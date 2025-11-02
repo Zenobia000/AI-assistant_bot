@@ -11,8 +11,6 @@ from typing import Optional, Union
 
 import structlog
 import torch
-import torchaudio
-from cached_path import cached_path
 
 from avatar.core.config import config
 
@@ -97,8 +95,7 @@ class TTSService:
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.speed = speed
-        self._model = None
-        self._vocoder = None
+        self._model = None  # Will hold F5TTS instance
 
         logger.info(
             "tts.init",
@@ -113,19 +110,19 @@ class TTSService:
             logger.info("tts.loading_model", model=self.model_name)
 
             try:
-                # Import F5-TTS components (module-level utilities)
-                from f5_tts.infer.utils_infer import load_model, load_vocoder
+                # Import F5-TTS high-level API
+                from f5_tts.api import F5TTS
 
-                # Load model
-                self._model, self._model_config = load_model(
-                    self.model_name,
-                    self.device
+                # Load model (auto-downloads from HuggingFace)
+                # model_name maps: "F5-TTS" -> "F5TTS_v1_Base"
+                model_id = "F5TTS_v1_Base" if self.model_name == "F5-TTS" else self.model_name
+
+                self._model = F5TTS(
+                    model=model_id,
+                    device=self.device
                 )
 
-                # Load vocoder (for converting to waveform)
-                self._vocoder = load_vocoder(vocoder_name="vocos", device=self.device)
-
-                logger.info("tts.model_loaded", model=self.model_name, device=self.device)
+                logger.info("tts.model_loaded", model=model_id, device=self.device)
 
             except ImportError as e:
                 logger.error("tts.import_failed", error=str(e))
@@ -227,43 +224,18 @@ class TTSService:
         """
         Blocking synthesis function (runs in thread pool)
 
-        Uses F5-TTS utility functions directly (not stored as instance variables).
+        Uses F5TTS high-level API for inference.
         """
-        # Import F5-TTS utilities (module-level functions, not instance state)
-        from f5_tts.infer.utils_infer import (
-            infer_process,
-            preprocess_ref_audio_text,
-            remove_silence_for_generated_wav
-        )
-
-        # Preprocess reference audio
-        ref_audio, ref_text = preprocess_ref_audio_text(
-            str(ref_audio_path),
-            ref_text
-        )
-
-        # Generate speech
-        with torch.inference_mode():
-            # Inference
-            generated_audio, final_sample_rate, _ = infer_process(
-                ref_audio=ref_audio,
-                ref_text=ref_text,
-                gen_text=text,
-                model_obj=self._model,
-                vocoder=self._vocoder,
-                device=self.device,
-                speed=self.speed
-            )
-
-        # Remove silence if requested
-        if remove_silence:
-            generated_audio = remove_silence_for_generated_wav(generated_audio)
-
-        # Save to file
-        torchaudio.save(
-            str(output_path),
-            generated_audio.unsqueeze(0),
-            final_sample_rate
+        # Use F5TTS.infer() which handles everything
+        self._model.infer(
+            ref_file=str(ref_audio_path),
+            ref_text=ref_text,
+            gen_text=text,
+            file_wave=str(output_path),
+            speed=self.speed,
+            remove_silence=remove_silence,
+            show_info=lambda x: None,  # Suppress print output
+            progress=lambda x: x  # Suppress progress bar
         )
 
     async def synthesize_fast(
@@ -314,9 +286,7 @@ class TTSService:
         if self._model is not None:
             logger.info("tts.unloading_model")
             del self._model
-            del self._vocoder
             self._model = None
-            self._vocoder = None
 
             # Clear CUDA cache
             if torch.cuda.is_available():
