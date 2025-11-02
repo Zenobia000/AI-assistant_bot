@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "totalTasks": 32,
-  "completedTasks": 3,
+  "completedTasks": 8,
   "phases": [
     {
       "id": "phase-1",
@@ -39,17 +39,20 @@
         {
           "id": "task-4",
           "title": "建立 SQLite 資料庫 schema",
-          "status": "pending",
+          "status": "completed",
           "assignee": "Claude Code",
           "estimatedHours": 1,
-          "details": "conversations + voice_profiles 表"
+          "details": "conversations + voice_profiles 表 + WAL mode",
+          "completedAt": "2025-11-01T20:00:00Z"
         },
         {
           "id": "task-5",
           "title": "初始化 Git 與 GitHub 遠端倉庫",
-          "status": "in_progress",
+          "status": "completed",
           "assignee": "Claude Code",
-          "estimatedHours": 0.5
+          "estimatedHours": 0.5,
+          "details": "Git initialized, remote configured (push requires authentication)",
+          "completedAt": "2025-11-02T05:10:00Z"
         },
         {
           "id": "task-6",
@@ -73,14 +76,20 @@
         {
           "id": "task-7",
           "title": "實作 FastAPI 主應用程式",
-          "status": "pending",
-          "estimatedHours": 4
+          "status": "completed",
+          "assignee": "Claude Code",
+          "estimatedHours": 4,
+          "details": "main.py with lifespan, config validation, structured logging",
+          "completedAt": "2025-11-01T22:00:00Z"
         },
         {
           "id": "task-8",
           "title": "實作 WebSocket 處理邏輯",
-          "status": "pending",
-          "estimatedHours": 6
+          "status": "completed",
+          "assignee": "Claude Code",
+          "estimatedHours": 6,
+          "details": "websocket.py with message handling, error recovery",
+          "completedAt": "2025-11-01T22:30:00Z"
         },
         {
           "id": "task-9",
@@ -103,8 +112,11 @@
         {
           "id": "task-12",
           "title": "實作資料庫操作層",
-          "status": "pending",
-          "estimatedHours": 4
+          "status": "completed",
+          "assignee": "Claude Code",
+          "estimatedHours": 4,
+          "details": "database.py with async aiosqlite, conversation & voice profile operations",
+          "completedAt": "2025-11-01T23:00:00Z"
         },
         {
           "id": "task-13",
