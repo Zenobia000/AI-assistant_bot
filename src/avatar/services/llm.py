@@ -72,6 +72,25 @@ class LLMService:
 
             logger.info("llm.model_loaded", model=self.model_path)
 
+    def _create_sampling_params(
+        self,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop: Optional[list[str]]
+    ) -> SamplingParams:
+        """
+        Create sampling parameters (DRY helper)
+
+        Extracted to avoid duplication between generate() and generate_stream().
+        """
+        return SamplingParams(
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            stop=stop or []
+        )
+
     async def generate(
         self,
         prompt: str,
@@ -93,14 +112,11 @@ class LLMService:
         Returns:
             Generated text
         """
-        # Load model if not already loaded
         await self._load_model()
 
-        sampling_params = SamplingParams(
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=stop or []
+        # Use helper to create sampling params (DRY)
+        sampling_params = self._create_sampling_params(
+            max_tokens, temperature, top_p, stop
         )
 
         logger.info(
@@ -162,14 +178,11 @@ class LLMService:
         Yields:
             Generated text chunks
         """
-        # Load model if not already loaded
         await self._load_model()
 
-        sampling_params = SamplingParams(
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=stop or []
+        # Use helper to create sampling params (DRY)
+        sampling_params = self._create_sampling_params(
+            max_tokens, temperature, top_p, stop
         )
 
         logger.info(

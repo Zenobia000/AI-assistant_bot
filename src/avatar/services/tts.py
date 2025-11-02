@@ -19,6 +19,55 @@ from avatar.core.config import config
 logger = structlog.get_logger()
 
 
+def _load_voice_profile(profile_name: str) -> tuple[Path, str]:
+    """
+    Load voice profile from disk (helper function)
+
+    Separates file system operations from TTS business logic.
+
+    Args:
+        profile_name: Name of voice profile directory
+
+    Returns:
+        Tuple of (ref_audio_path, ref_text)
+
+    Raises:
+        FileNotFoundError: Profile directory or audio files not found
+    """
+    profile_dir = config.AUDIO_PROFILES / profile_name
+
+    if not profile_dir.exists():
+        raise FileNotFoundError(
+            f"Voice profile directory not found: {profile_dir}"
+        )
+
+    # Find reference audio (first .wav file)
+    ref_audio_files = list(profile_dir.glob("*.wav"))
+    if not ref_audio_files:
+        raise FileNotFoundError(
+            f"No .wav files found in profile: {profile_name}"
+        )
+
+    ref_audio_path = ref_audio_files[0]
+
+    # Load reference text
+    ref_text_path = profile_dir / "reference.txt"
+    if not ref_text_path.exists():
+        raise FileNotFoundError(
+            f"reference.txt not found in profile: {profile_name}\n"
+            f"Expected at: {ref_text_path}"
+        )
+
+    ref_text = ref_text_path.read_text(encoding="utf-8").strip()
+
+    if not ref_text:
+        raise ValueError(
+            f"reference.txt is empty in profile: {profile_name}"
+        )
+
+    return ref_audio_path, ref_text
+
+
 class TTSService:
     """
     Text-to-Speech service powered by F5-TTS
@@ -225,7 +274,10 @@ class TTSService:
         output_path: Union[str, Path]
     ) -> Path:
         """
-        Fast synthesis using pre-stored voice profile
+        Convenience method for synthesis using pre-stored voice profile
+
+        This method loads the voice profile and delegates to synthesize().
+        File system operations are handled by _load_voice_profile().
 
         Args:
             text: Text to synthesize
@@ -236,43 +288,20 @@ class TTSService:
             Path to generated audio file
 
         Raises:
-            FileNotFoundError: Voice profile not found
+            FileNotFoundError: Voice profile or required files not found
+            ValueError: Profile files are invalid
             RuntimeError: Synthesis failed
         """
-        # Locate voice profile
-        profile_dir = config.AUDIO_PROFILES / voice_profile_name
-
-        if not profile_dir.exists():
-            logger.error("tts.profile_not_found", profile=voice_profile_name)
-            raise FileNotFoundError(f"Voice profile not found: {voice_profile_name}")
-
-        # Find reference audio and text
-        ref_audio_files = list(profile_dir.glob("*.wav"))
-        if not ref_audio_files:
-            raise FileNotFoundError(f"No audio files in profile: {voice_profile_name}")
-
-        ref_audio_path = ref_audio_files[0]
-
-        # Try to find reference text
-        ref_text_path = profile_dir / "reference.txt"
-        if ref_text_path.exists():
-            ref_text = ref_text_path.read_text(encoding="utf-8").strip()
-        else:
-            # Use a generic prompt if no reference text
-            ref_text = "Hello, this is a voice sample."
-            logger.warning(
-                "tts.no_ref_text",
-                profile=voice_profile_name,
-                using_default=ref_text
-            )
-
         logger.info(
-            "tts.fast_synthesis",
+            "tts.fast_synthesis_start",
             profile=voice_profile_name,
             text_length=len(text)
         )
 
-        # Use standard synthesis
+        # Load voice profile (file system operations separated)
+        ref_audio_path, ref_text = _load_voice_profile(voice_profile_name)
+
+        # Delegate to core synthesis method
         return await self.synthesize(
             text=text,
             ref_audio_path=ref_audio_path,
