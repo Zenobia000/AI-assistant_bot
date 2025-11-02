@@ -113,20 +113,8 @@ class TTSService:
             logger.info("tts.loading_model", model=self.model_name)
 
             try:
-                # Import F5-TTS components
-                from f5_tts.infer.utils_infer import (
-                    infer_process,
-                    load_model,
-                    load_vocoder,
-                    preprocess_ref_audio_text,
-                    remove_silence_for_generated_wav
-                )
-                from f5_tts.model import DiT
-
-                # Store imported functions for later use
-                self._infer_process = infer_process
-                self._preprocess_ref_audio_text = preprocess_ref_audio_text
-                self._remove_silence = remove_silence_for_generated_wav
+                # Import F5-TTS components (module-level utilities)
+                from f5_tts.infer.utils_infer import load_model, load_vocoder
 
                 # Load model
                 self._model, self._model_config = load_model(
@@ -236,9 +224,20 @@ class TTSService:
         output_path: Path,
         remove_silence: bool
     ):
-        """Blocking synthesis function (runs in thread pool)"""
+        """
+        Blocking synthesis function (runs in thread pool)
+
+        Uses F5-TTS utility functions directly (not stored as instance variables).
+        """
+        # Import F5-TTS utilities (module-level functions, not instance state)
+        from f5_tts.infer.utils_infer import (
+            infer_process,
+            preprocess_ref_audio_text,
+            remove_silence_for_generated_wav
+        )
+
         # Preprocess reference audio
-        ref_audio, ref_text = self._preprocess_ref_audio_text(
+        ref_audio, ref_text = preprocess_ref_audio_text(
             str(ref_audio_path),
             ref_text
         )
@@ -246,7 +245,7 @@ class TTSService:
         # Generate speech
         with torch.inference_mode():
             # Inference
-            generated_audio, final_sample_rate, _ = self._infer_process(
+            generated_audio, final_sample_rate, _ = infer_process(
                 ref_audio=ref_audio,
                 ref_text=ref_text,
                 gen_text=text,
@@ -258,7 +257,7 @@ class TTSService:
 
         # Remove silence if requested
         if remove_silence:
-            generated_audio = self._remove_silence(generated_audio)
+            generated_audio = remove_silence_for_generated_wav(generated_audio)
 
         # Save to file
         torchaudio.save(
