@@ -130,7 +130,11 @@ class ConversationSession:
 
             # Step 3: TTS - Synthesize speech
             await self.send_status("Synthesizing speech...", "tts")
-            tts_url = await self._run_tts(llm_response)
+            tts_url = await self._run_tts(
+                text=llm_response,
+                user_audio_path=audio_path,
+                user_text=transcription
+            )
 
             # Send TTS ready notification
             from avatar.models.messages import TTSReadyMessage
@@ -177,51 +181,143 @@ class ConversationSession:
         return audio_path
 
     async def _run_stt(self, audio_path: Path) -> str:
-        """Run speech-to-text on audio file"""
-        # TODO: Integrate Whisper STT (Task 9)
-        # Placeholder implementation
+        """Run speech-to-text on audio file using Whisper"""
+        from avatar.services.stt import get_stt_service
+
         logger.info("session.stt.start", session_id=self.session_id, audio_path=str(audio_path))
 
-        # Simulate STT processing
-        await asyncio.sleep(0.5)
+        # Get STT service (singleton)
+        stt = await get_stt_service()
 
-        # Mock transcription
-        mock_text = f"[STT Placeholder] User spoke (turn {self.turn_number})"
-        logger.info("session.stt.complete", session_id=self.session_id, text=mock_text)
-        return mock_text
+        # Transcribe audio (auto language detection)
+        text, metadata = await stt.transcribe(
+            audio_path=audio_path,
+            language=None,  # Auto-detect
+            beam_size=5,
+            vad_filter=True
+        )
+
+        logger.info("session.stt.complete",
+                   session_id=self.session_id,
+                   text=text,
+                   language=metadata["language"],
+                   duration_sec=metadata["duration"],
+                   segments=metadata["segments_count"])
+
+        return text
 
     async def _run_llm(self, user_text: str) -> str:
-        """Generate LLM response"""
-        # TODO: Integrate vLLM (Task 10)
-        # Placeholder implementation
+        """Generate LLM response using vLLM"""
+        from avatar.services.llm import get_llm_service
+
         logger.info("session.llm.start", session_id=self.session_id, prompt=user_text)
 
-        # Simulate LLM processing
-        await asyncio.sleep(0.8)
+        # Get LLM service (singleton)
+        llm = await get_llm_service()
 
-        # Mock response
-        mock_response = f"[LLM Placeholder] I heard you say: {user_text}"
-        logger.info("session.llm.complete", session_id=self.session_id, response=mock_response)
-        return mock_response
+        # Format as chat messages
+        messages = [{"role": "user", "content": user_text}]
 
-    async def _run_tts(self, text: str) -> str:
-        """Synthesize speech from text"""
-        # TODO: Integrate F5-TTS (Task 11)
-        # Placeholder implementation
-        logger.info("session.tts.start", session_id=self.session_id, text=text)
+        # Generate response using Qwen2.5-Instruct chat template
+        response = await llm.chat(
+            messages=messages,
+            max_tokens=512,
+            temperature=0.7
+        )
 
-        # Simulate TTS processing
-        await asyncio.sleep(1.0)
+        logger.info("session.llm.complete",
+                   session_id=self.session_id,
+                   response_length=len(response),
+                   prompt_length=len(user_text))
 
-        # Mock TTS file
+        return response
+
+    async def _run_tts(self, text: str, user_audio_path: Optional[Path] = None, user_text: Optional[str] = None) -> str:
+        """
+        Synthesize speech from text using F5-TTS
+
+        Supports two modes:
+        1. Voice profile mode: Use pre-registered voice profile
+        2. Self-cloning mode: Use user's own audio as reference (fallback)
+
+        Args:
+            text: Text to synthesize
+            user_audio_path: Path to user's audio (for self-cloning fallback)
+            user_text: User's transcribed text (for self-cloning fallback)
+
+        Returns:
+            URL to synthesized audio file
+        """
+        from avatar.services.tts import get_tts_service
+
+        logger.info("session.tts.start",
+                   session_id=self.session_id,
+                   text_length=len(text),
+                   has_voice_profile=self.voice_profile_id is not None)
+
+        # Get TTS service (singleton)
+        tts = await get_tts_service()
+
+        # Output file path
         filename = f"{self.session_id}_turn{self.turn_number}_tts.wav"
-        tts_path = config.AUDIO_TTS_FAST / filename
+        output_path = config.AUDIO_TTS_FAST / filename
 
-        # Create empty placeholder file
-        tts_path.write_bytes(b"RIFF....WAV")  # Minimal WAV header placeholder
+        try:
+            if self.voice_profile_id:
+                # Mode 1: Use voice profile
+                # TODO: Query database for voice_profile_name
+                # For now, use placeholder
+                voice_profile_name = f"profile_{self.voice_profile_id}"
 
+                await tts.synthesize_fast(
+                    text=text,
+                    voice_profile_name=voice_profile_name,
+                    output_path=output_path
+                )
+
+                logger.info("session.tts.complete",
+                           session_id=self.session_id,
+                           mode="voice_profile",
+                           profile_id=self.voice_profile_id)
+
+            elif user_audio_path and user_text:
+                # Mode 2: Self-cloning fallback
+                logger.info("session.tts.self_cloning",
+                           session_id=self.session_id,
+                           ref_audio=str(user_audio_path))
+
+                await tts.synthesize(
+                    text=text,
+                    ref_audio_path=user_audio_path,
+                    ref_text=user_text,
+                    output_path=output_path,
+                    remove_silence=True
+                )
+
+                logger.info("session.tts.complete",
+                           session_id=self.session_id,
+                           mode="self_cloning")
+
+            else:
+                # No voice profile and no reference audio
+                raise RuntimeError(
+                    "TTS requires either voice_profile_id or user audio for reference"
+                )
+
+        except FileNotFoundError as e:
+            logger.error("session.tts.profile_not_found",
+                        session_id=self.session_id,
+                        error=str(e))
+            raise RuntimeError(f"Voice profile not found: {e}") from e
+
+        # Return audio URL
         audio_url = f"/api/audio/tts/{filename}"
-        logger.info("session.tts.complete", session_id=self.session_id, url=audio_url)
+
+        logger.info("session.tts.complete",
+                   session_id=self.session_id,
+                   url=audio_url,
+                   size_bytes=output_path.stat().st_size)
+
         return audio_url
 
     async def _save_conversation(
@@ -257,11 +353,35 @@ async def websocket_endpoint(websocket: WebSocket):
     WebSocket endpoint handler for /ws/chat
 
     Manages the full lifecycle of a conversation session.
+    Includes VRAM monitoring and concurrency control.
     """
-    await websocket.accept()
+    from avatar.core.session_manager import get_session_manager
 
-    # Generate session ID
+    # Generate session ID before accepting connection
     session_id = str(uuid.uuid4())
+
+    # Try to acquire session slot (with VRAM check)
+    session_manager = get_session_manager()
+
+    if not await session_manager.acquire_session(session_id, timeout=1.0):
+        # Server is full or VRAM exhausted
+        await websocket.accept()  # Accept to send error message
+
+        error_msg = ErrorMessage(
+            error="Server is at capacity. Please try again later.",
+            code="SERVER_FULL",
+            session_id=session_id,
+        )
+        await websocket.send_text(error_msg.model_dump_json())
+        await websocket.close()
+
+        logger.warning("websocket.rejected",
+                      session_id=session_id,
+                      reason="server_full")
+        return
+
+    # Session acquired successfully
+    await websocket.accept()
     session = ConversationSession(session_id, websocket)
 
     # Send session created notification
@@ -311,4 +431,8 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.exception("session.fatal_error", session_id=session_id)
         await session.send_error(f"Fatal error: {str(e)}", "FATAL_ERROR")
     finally:
-        logger.info("session.closed", session_id=session_id, turns=session.turn_number)
+        # Release session slot
+        session_manager.release_session(session_id)
+        logger.info("session.closed",
+                   session_id=session_id,
+                   turns=session.turn_number)
