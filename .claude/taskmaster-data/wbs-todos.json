@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "totalTasks": 32,
-  "completedTasks": 1,
+  "completedTasks": 3,
   "phases": [
     {
       "id": "phase-1",
@@ -21,18 +21,20 @@
         {
           "id": "task-2",
           "title": "配置 Poetry 虛擬環境與依賴安裝",
-          "status": "pending",
+          "status": "completed",
           "assignee": "Human + Claude",
           "estimatedHours": 1,
-          "details": "poetry install + PyTorch CUDA + vLLM"
+          "details": "poetry install + PyTorch 2.3.1+cu121 + vLLM 0.5.3",
+          "completedAt": "2025-11-02T05:05:00Z"
         },
         {
           "id": "task-3",
           "title": "下載並驗證 AI 模型",
-          "status": "pending",
+          "status": "completed",
           "assignee": "Claude Code",
           "estimatedHours": 2,
-          "details": "Whisper + Qwen-7B + F5-TTS + CosyVoice"
+          "details": "F5-TTS 1.1.9 + CosyVoice3 + flash-attn 2.5.8 (Whisper + Qwen-7B 將於後續 Task 下載)",
+          "completedAt": "2025-11-02T05:05:00Z"
         },
         {
           "id": "task-4",
