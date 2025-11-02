@@ -221,6 +221,29 @@ class LLMService:
             logger.error("llm.stream_failed", error=str(e))
             raise RuntimeError(f"LLM streaming failed: {e}") from e
 
+    def _format_chat_messages(self, messages: list[dict[str, str]]) -> str:
+        """
+        Format messages into Qwen2.5 chat template (DRY helper)
+
+        Qwen2.5-Instruct uses: <|im_start|>role\ncontent<|im_end|>
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+
+        Returns:
+            Formatted prompt string
+        """
+        formatted_prompt = ""
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            formatted_prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
+
+        # Add assistant prefix to trigger response
+        formatted_prompt += "<|im_start|>assistant\n"
+
+        return formatted_prompt
+
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -228,7 +251,7 @@ class LLMService:
         temperature: float = 0.7
     ) -> str:
         """
-        Chat completion with message history
+        Chat completion with message history (non-streaming)
 
         Args:
             messages: List of message dicts with 'role' and 'content'
@@ -239,16 +262,7 @@ class LLMService:
         Returns:
             Assistant's response text
         """
-        # Format messages into Qwen2.5 chat template
-        # Qwen2.5-Instruct uses: <|im_start|>role\ncontent<|im_end|>
-        formatted_prompt = ""
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            formatted_prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
-
-        # Add assistant prefix to trigger response
-        formatted_prompt += "<|im_start|>assistant\n"
+        formatted_prompt = self._format_chat_messages(messages)
 
         logger.info(
             "llm.chat_start",
@@ -265,6 +279,43 @@ class LLMService:
         )
 
         return response.strip()
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 512,
+        temperature: float = 0.7
+    ) -> AsyncIterator[str]:
+        """
+        Chat completion with message history (streaming)
+
+        Yields tokens as they're generated for lower TTFT.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+                      Example: [{'role': 'user', 'content': 'Hello'}]
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+
+        Yields:
+            Generated text chunks
+        """
+        formatted_prompt = self._format_chat_messages(messages)
+
+        logger.info(
+            "llm.chat_stream_start",
+            messages_count=len(messages),
+            prompt_len=len(formatted_prompt)
+        )
+
+        # Stream response
+        async for chunk in self.generate_stream(
+            formatted_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=["<|im_end|>"]
+        ):
+            yield chunk
 
     async def unload_model(self):
         """Unload model to free VRAM"""

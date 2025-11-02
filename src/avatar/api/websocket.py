@@ -321,8 +321,20 @@ class ConversationSession:
         return text
 
     async def _run_llm(self, user_text: str) -> str:
-        """Generate LLM response using vLLM"""
+        """
+        Generate LLM response using vLLM with streaming
+
+        Streams response chunks to client for lower TTFT (Time To First Token).
+        Returns complete response text at the end.
+
+        Args:
+            user_text: User's input text
+
+        Returns:
+            Complete LLM response text
+        """
         from avatar.services.llm import get_llm_service
+        from avatar.models.messages import LLMResponseMessage
 
         logger.info("session.llm.start", session_id=self.session_id, prompt=user_text)
 
@@ -332,19 +344,33 @@ class ConversationSession:
         # Format as chat messages
         messages = [{"role": "user", "content": user_text}]
 
-        # Generate response using Qwen2.5-Instruct chat template
-        response = await llm.chat(
+        # Stream response chunks to client
+        full_response = ""
+        chunk_count = 0
+
+        async for chunk in llm.chat_stream(
             messages=messages,
             max_tokens=512,
             temperature=0.7
-        )
+        ):
+            full_response += chunk
+            chunk_count += 1
+
+            # Send intermediate chunk to client
+            chunk_msg = LLMResponseMessage(
+                text=chunk,
+                is_final=False,
+                session_id=self.session_id
+            )
+            await self.websocket.send_text(chunk_msg.model_dump_json())
 
         logger.info("session.llm.complete",
                    session_id=self.session_id,
-                   response_length=len(response),
+                   response_length=len(full_response),
+                   chunks_sent=chunk_count,
                    prompt_length=len(user_text))
 
-        return response
+        return full_response.strip()
 
     async def _run_tts(self, text: str, user_audio_path: Optional[Path] = None, user_text: Optional[str] = None) -> str:
         """
