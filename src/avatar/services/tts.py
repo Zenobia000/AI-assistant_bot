@@ -93,7 +93,19 @@ class TTSService:
             speed: Speech speed multiplier (1.0 = normal, >1.0 = faster)
         """
         self.model_name = model_name
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Use configured GPU device consistently
+        if device:
+            self.device = device
+        elif torch.cuda.is_available():
+            # Use the configured optimal GPU
+            gpu_device = config.get_optimal_gpu() if hasattr(config, 'get_optimal_gpu') else 0
+            self.device = f"cuda:{gpu_device}"
+            # Set CUDA device for consistency
+            torch.cuda.set_device(gpu_device)
+        else:
+            self.device = "cpu"
+
         self.speed = speed
         self._model = None  # Will hold F5TTS instance
 
@@ -333,3 +345,107 @@ async def get_tts_service() -> TTSService:
             logger.info("tts.service_created")
 
     return _tts_service
+
+
+class TTSDualModeManager:
+    """
+    Manages both Fast (F5-TTS) and HQ (CosyVoice) TTS modes
+
+    Provides unified interface for dual TTS modes with intelligent
+    mode selection based on requirements and system resources.
+
+    Design Philosophy:
+    - Simple unified interface
+    - Resource-aware mode selection
+    - Graceful fallback to fast mode
+    """
+
+    def __init__(self):
+        self._fast_service = None
+        self._hq_service = None
+
+    async def get_fast_service(self):
+        """Get fast TTS service (F5-TTS)"""
+        if self._fast_service is None:
+            self._fast_service = await get_tts_service()
+        return self._fast_service
+
+    async def get_hq_service(self):
+        """Get HQ TTS service (CosyVoice)"""
+        if self._hq_service is None:
+            try:
+                from avatar.services.tts_hq import get_tts_hq_service
+                self._hq_service = get_tts_hq_service()
+            except ImportError:
+                logger.warning("tts.hq_unavailable", reason="CosyVoice not installed")
+                return None
+        return self._hq_service
+
+    async def synthesize_dual_mode(
+        self,
+        text: str,
+        voice_profile_name: str,
+        output_path_fast: Path,
+        output_path_hq: Optional[Path] = None,
+        prefer_hq: bool = False
+    ) -> tuple[Path, Optional[Path]]:
+        """
+        Synthesize using dual mode strategy
+
+        Args:
+            text: Text to synthesize
+            voice_profile_name: Voice profile to use
+            output_path_fast: Output path for fast TTS
+            output_path_hq: Output path for HQ TTS (optional)
+            prefer_hq: Whether to prioritize HQ over fast
+
+        Returns:
+            Tuple of (fast_path, hq_path) - hq_path may be None if unavailable
+        """
+        fast_service = await self.get_fast_service()
+        hq_service = await self.get_hq_service()
+
+        fast_result = None
+        hq_result = None
+
+        if prefer_hq and hq_service and output_path_hq:
+            # Try HQ first
+            try:
+                hq_result = await hq_service.synthesize_hq(
+                    text=text,
+                    voice_profile_name=voice_profile_name,
+                    output_path=output_path_hq
+                )
+                logger.info("tts.dual_mode.hq_success")
+            except Exception as e:
+                logger.warning("tts.dual_mode.hq_failed", error=str(e))
+
+        # Always generate fast version (fallback or parallel)
+        try:
+            fast_result = await fast_service.synthesize_fast(
+                text=text,
+                voice_profile_name=voice_profile_name,
+                output_path=output_path_fast
+            )
+            logger.info("tts.dual_mode.fast_success")
+        except Exception as e:
+            logger.error("tts.dual_mode.fast_failed", error=str(e))
+            if hq_result is None:
+                raise RuntimeError("Both fast and HQ TTS failed")
+
+        return fast_result, hq_result
+
+
+# Global dual mode manager
+_dual_mode_manager: Optional[TTSDualModeManager] = None
+
+
+def get_tts_dual_mode_manager() -> TTSDualModeManager:
+    """Get singleton dual mode TTS manager"""
+    global _dual_mode_manager
+
+    if _dual_mode_manager is None:
+        _dual_mode_manager = TTSDualModeManager()
+        logger.info("tts.dual_mode_manager_created")
+
+    return _dual_mode_manager

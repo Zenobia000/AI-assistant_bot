@@ -306,6 +306,238 @@ class DatabaseService:
 
         return deleted
 
+    # New voice profile methods for UUID-based API
+    async def create_voice_profile_v2(self, profile_data: dict) -> str:
+        """
+        Create voice profile with UUID (API v2)
+
+        Args:
+            profile_data: Profile data with fields:
+                - id: UUID string
+                - name: Profile name
+                - description: Optional description
+                - reference_text: Optional reference text
+                - audio_path: Path to audio file
+                - file_size: File size in bytes
+                - created_at: Creation timestamp
+                - updated_at: Update timestamp
+
+        Returns:
+            Profile UUID
+        """
+        if not self._conn:
+            await self.connect()
+
+        # Check if table needs migration
+        await self._ensure_voice_profiles_v2_schema()
+
+        created_at = profile_data['created_at'].timestamp()
+        updated_at = profile_data['updated_at'].timestamp()
+
+        await self._conn.execute(
+            """
+            INSERT INTO voice_profiles_v2 (
+                id, name, description, reference_text, audio_path,
+                file_size, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile_data['id'],
+                profile_data['name'],
+                profile_data.get('description'),
+                profile_data.get('reference_text'),
+                profile_data['audio_path'],
+                profile_data['file_size'],
+                created_at,
+                updated_at
+            ),
+        )
+
+        await self._conn.commit()
+
+        logger.info(
+            "db.voice_profile_v2.created",
+            id=profile_data['id'],
+            name=profile_data['name'],
+            file_size=profile_data['file_size']
+        )
+
+        return profile_data['id']
+
+    async def get_voice_profile_v2(self, profile_id: str) -> Optional[dict]:
+        """Get voice profile by UUID"""
+        if not self._conn:
+            await self.connect()
+
+        await self._ensure_voice_profiles_v2_schema()
+
+        cursor = await self._conn.execute(
+            """
+            SELECT id, name, description, reference_text, audio_path,
+                   file_size, created_at, updated_at
+            FROM voice_profiles_v2
+            WHERE id = ?
+            """,
+            (profile_id,),
+        )
+
+        row = await cursor.fetchone()
+        if row:
+            from datetime import datetime
+            return {
+                'id': row[0],
+                'name': row[1],
+                'description': row[2],
+                'reference_text': row[3],
+                'audio_path': row[4],
+                'file_size': row[5],
+                'created_at': datetime.fromtimestamp(row[6]),
+                'updated_at': datetime.fromtimestamp(row[7])
+            }
+        return None
+
+    async def get_voice_profiles_v2(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Get voice profiles with pagination"""
+        if not self._conn:
+            await self.connect()
+
+        await self._ensure_voice_profiles_v2_schema()
+
+        cursor = await self._conn.execute(
+            """
+            SELECT id, name, description, reference_text, audio_path,
+                   file_size, created_at, updated_at
+            FROM voice_profiles_v2
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        )
+
+        rows = await cursor.fetchall()
+        from datetime import datetime
+
+        profiles = []
+        for row in rows:
+            profiles.append({
+                'id': row[0],
+                'name': row[1],
+                'description': row[2],
+                'reference_text': row[3],
+                'audio_path': row[4],
+                'file_size': row[5],
+                'created_at': datetime.fromtimestamp(row[6]),
+                'updated_at': datetime.fromtimestamp(row[7])
+            })
+
+        logger.debug("db.voice_profiles_v2.listed", count=len(profiles))
+        return profiles
+
+    async def count_voice_profiles_v2(self) -> int:
+        """Count total voice profiles"""
+        if not self._conn:
+            await self.connect()
+
+        await self._ensure_voice_profiles_v2_schema()
+
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM voice_profiles_v2")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def update_voice_profile_v2(self, profile_id: str, update_data: dict) -> bool:
+        """Update voice profile"""
+        if not self._conn:
+            await self.connect()
+
+        await self._ensure_voice_profiles_v2_schema()
+
+        # Build dynamic update query
+        fields = []
+        values = []
+
+        for field in ['name', 'description', 'reference_text', 'audio_path', 'file_size']:
+            if field in update_data:
+                fields.append(f"{field} = ?")
+                values.append(update_data[field])
+
+        if 'updated_at' in update_data:
+            fields.append("updated_at = ?")
+            values.append(update_data['updated_at'].timestamp())
+
+        if not fields:
+            return True  # Nothing to update
+
+        values.append(profile_id)
+
+        cursor = await self._conn.execute(
+            f"UPDATE voice_profiles_v2 SET {', '.join(fields)} WHERE id = ?",
+            values
+        )
+
+        await self._conn.commit()
+
+        success = cursor.rowcount > 0
+        if success:
+            logger.info("db.voice_profile_v2.updated", id=profile_id)
+        else:
+            logger.warning("db.voice_profile_v2.update_failed", id=profile_id)
+
+        return success
+
+    async def delete_voice_profile_v2(self, profile_id: str) -> bool:
+        """Delete voice profile by UUID"""
+        if not self._conn:
+            await self.connect()
+
+        await self._ensure_voice_profiles_v2_schema()
+
+        cursor = await self._conn.execute(
+            "DELETE FROM voice_profiles_v2 WHERE id = ?",
+            (profile_id,)
+        )
+
+        await self._conn.commit()
+
+        success = cursor.rowcount > 0
+        if success:
+            logger.info("db.voice_profile_v2.deleted", id=profile_id)
+        else:
+            logger.warning("db.voice_profile_v2.delete_failed", id=profile_id)
+
+        return success
+
+    async def _ensure_voice_profiles_v2_schema(self):
+        """Ensure voice_profiles_v2 table exists"""
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS voice_profiles_v2 (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                reference_text TEXT,
+                audio_path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+
+                UNIQUE(name)
+            )
+            """
+        )
+        await self._conn.commit()
+
 
 # Global database service instance
 db = DatabaseService()
+
+
+async def get_database_service() -> DatabaseService:
+    """
+    Dependency injection for database service
+
+    Returns:
+        Database service instance
+    """
+    if not db._conn:
+        await db.connect()
+    return db

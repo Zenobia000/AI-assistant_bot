@@ -1,8 +1,8 @@
 #!/bin/bash
 # Run E2E tests with CUDA 11 compatibility fix
 
-# Set project root
-PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
+# Set project root (go up two levels from scripts/testing)
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." &> /dev/null && pwd )"
 
 # Set CUDA compatibility library path
 export LD_LIBRARY_PATH="${PROJECT_ROOT}/.cuda_compat:/usr/local/cuda-12.1/targets/x86_64-linux/lib:${LD_LIBRARY_PATH}"
@@ -34,7 +34,7 @@ fi
 echo ""
 echo "📋 Step 2: Full E2E Pipeline Tests"
 echo "------------------------------------------------------------"
-poetry run python tests/e2e_pipeline_test.py
+poetry run python tests/e2e/e2e_pipeline_test.py
 e2e_result=$?
 
 echo ""

@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from avatar.core.config import config
 from avatar.api.websocket import websocket_endpoint
+from avatar.api.voice_profiles import router as voice_profiles_router
 
 # Initialize structured logging
 structlog.configure(
@@ -119,6 +120,10 @@ async def system_info():
     })
 
 
+# Include routers
+app.include_router(voice_profiles_router)
+
+
 # Root endpoint
 @app.get("/", tags=["System"])
 async def root():
@@ -129,6 +134,7 @@ async def root():
         "docs": "/docs",
         "health": "/health",
         "websocket": "/ws/chat",
+        "voice_profiles": "/api/voice-profiles",
     })
 
 

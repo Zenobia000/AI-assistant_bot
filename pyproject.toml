@@ -68,14 +68,33 @@ structlog = ">=23.0.0"  # 結構化日誌
 # ⚠️ 已知問題: Poetry show 會顯示錯誤版本，請使用 pip list 檢查
 vllm = "0.5.3"  # ⚠️ 降級：0.11.0 需要 torch 2.8.0，與 CosyVoice3 衝突
 faster-whisper = "^1.2.1"
+hyperpyyaml = "^1.2.2"
+modelscope = "^1.31.0"
+openai-whisper = "^20250625"
+inflect = "^7.5.0"
+librosa = "^0.11.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.4.0"
 pytest-asyncio = ">=0.21.0"
 pytest-cov = ">=4.1.0"
+httpx = ">=0.25.0"  # For FastAPI testing
 black = ">=23.0.0"
 ruff = ">=0.1.0"
 mypy = ">=1.7.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --tb=short --cov=src --cov-report=html --cov-report=term-missing"
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "performance: Performance tests",
+    "slow: Slow tests requiring GPU"
+]
 
 # PyTorch with CUDA support - ⚠️ 固定版本 2.3.1，不可升級
 # 警告: 不要使用 poetry update torch，會破壞相容性！
