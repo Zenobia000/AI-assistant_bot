@@ -384,9 +384,25 @@ avatar/
 ├── frontend/                # React 前端
 │   ├── src/
 │   └── package.json
-├── scripts/                 # 工具腳本
-│   ├── download_models.py   # 模型下載
-│   └── validate_setup.py    # 環境驗證
+├── scripts/                 # 工具腳本 (Linus 式分類組織)
+│   ├── avatar-scripts       # 主控制腳本 (一個命令管理所有功能)
+│   ├── setup/               # 環境設置
+│   │   ├── download_models.py     # 模型下載
+│   │   ├── validate_setup.py      # 環境驗證
+│   │   ├── init_database.py       # 資料庫初始化
+│   │   ├── setup_cuda_wsl2.sh     # CUDA 設置 (Linux)
+│   │   └── setup_cuda_wsl2.ps1    # CUDA 設置 (Windows)
+│   ├── maintenance/         # 系統維護
+│   │   ├── cleanup_cache.sh       # 智能快取清理
+│   │   ├── quick_cleanup.sh       # 快速清理
+│   │   └── linux_resource_cleanup.sh  # 深度資源清理
+│   ├── testing/             # 測試驗證
+│   │   ├── test_model_loading.py  # 模型載入測試
+│   │   ├── generate_test_audio.py # 音檔生成測試
+│   │   ├── create_simple_test_audio.py  # 簡單音檔測試
+│   │   └── run_tests.sh           # 測試套件
+│   ├── development/         # 開發工具 (預留擴展)
+│   └── README.md            # 腳本使用文檔
 ├── tests/                   # 測試
 │   ├── unit/
 │   └── integration/

@@ -44,7 +44,7 @@ graph TB
         subgraph models["AI 模型"]
             Whisper["Whisper<br>STT - CPU"]
             vLLM["vLLM<br>Qwen-7B - GPU"]
-            TTS["TTS<br>F5/CosyVoice - GPU"]
+            TTS["TTS<br>F5-TTS - GPU"]
         end
     end
 
@@ -60,12 +60,12 @@ graph TB
     style TTS fill:#BD10E0,stroke:#9012FE,stroke-width:2px,color:#fff
 ```
 
-### 核心流程（先快後美）
+### 核心流程（F5-TTS 快速合成）
 ```
 1. 用戶語音 → Whisper 轉文字 (≤600ms)
 2. 文字 → vLLM 生成回應 (TTFT ≤800ms)
-3. 回應 → F5-TTS 快速合成 (≤1.5s) → 立即播放
-4. 背景 → CosyVoice 高質合成 (5-10s) → 覆蓋歷史記錄
+3. 回應 → F5-TTS 語音合成 (≤1.5s) → 立即播放
+4. 存儲 → 對話歷史與音檔歸檔
 ```
 
 ### 資源分配
@@ -126,8 +126,7 @@ CREATE TABLE conversations (
 
     -- AI 回應
     ai_text TEXT NOT NULL,                -- LLM 生成文字
-    ai_audio_fast_path TEXT,              -- audio/tts_fast/{turn_id}.wav
-    ai_audio_hq_path TEXT,                -- audio/tts_hq/{turn_id}.wav
+    ai_audio_path TEXT,                   -- audio/tts/{turn_id}.wav
 
     -- 元數據
     voice_profile_id INTEGER,             -- 使用的聲紋 ID
@@ -161,10 +160,10 @@ audio/
 ├── raw/                       # 用戶原始錄音
 │   └── {session_id}_{turn}.wav
 ├── profiles/                  # 聲音樣本
-│   └── {profile_id}.wav
-├── tts_fast/                  # 快速合成
-│   └── {turn_id}.wav
-└── tts_hq/                    # 高質合成
+│   └── {profile_id}/
+│       ├── reference.wav      # 參考音檔
+│       └── reference.txt      # 參考文字
+└── tts/                       # F5-TTS 合成輸出
     └── {turn_id}.wav
 ```
 
@@ -204,7 +203,7 @@ audio/
 | 風險分類 | 描述 | 影響 | 替代/回退方案 |
 |:---|:---|:---|:---|
 | **VRAM OOM** | 並發 >5 會話導致顯存溢出 | 🔴 高 | - 限流：最多 5 並發<br>- 降級：純 Fast TTS<br>- 監控：實時 VRAM 告警 |
-| **HQ-TTS 載入慢** | 首次載入 5-10 秒 | 🟡 中 | - 預熱：啟動時預載<br>- 通知：顯示載入進度<br>- 降級：純 Fast 模式 |
+| **F5-TTS 載入慢** | 首次載入 5-10 秒 | 🟡 中 | - 預熱：啟動時預載<br>- 通知：顯示載入進度<br>- 降級：CPU 模式 |
 | **台式口音誤字** | CER ~5-10% | 🟡 中 | - 後處理：簡單糾錯<br>- UI：可編輯轉錄文字<br>- 改進：收集數據微調 |
 | **WebSocket 斷線** | 網路不穩定 | 🟢 低 | - 重連：Exponential Backoff<br>- 恢復：會話狀態持久化 |
 | **SQLite 鎖定** | 高並發寫入 | 🟢 低 | - WAL 模式：提升並發<br>- 批量寫入：減少鎖競爭 |
@@ -350,19 +349,32 @@ MAX_JOBS=4 poetry run pip install flash-attn --no-build-isolation --no-cache-dir
 
 #### 步驟 6: 下載 AI 模型
 
+> **新功能**: 腳本已重組為 Linus 式分類結構，使用主控制腳本簡化操作
+
 ```bash
-poetry run python scripts/download_models.py
-# 或在激活環境後：python scripts/download_models.py
+# 方法 A: 使用主控制腳本（推薦）
+./scripts/avatar-scripts setup-env
+
+# 方法 B: 直接執行腳本
+poetry run python scripts/setup/download_models.py
+# 或在激活環境後：python scripts/setup/download_models.py
+
+# 查看所有可用腳本功能
+./scripts/avatar-scripts help
 ```
 
 #### 步驟 7: 啟動後端服務
 
 ```bash
-# 使用 Poetry run
-poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 使用 Poetry run (推薦)
+PYTHONPATH=src poetry run uvicorn avatar.main:app --host 0.0.0.0 --port 8000 --reload
 
-# 或在激活環境後直接執行
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 或使用 Python 模組方式
+PYTHONPATH=src poetry run python -m avatar.main
+
+# 在激活環境後直接執行
+source .venv/bin/activate  # Linux/macOS/WSL
+PYTHONPATH=src uvicorn avatar.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 #### 步驟 8: 啟動前端（新終端）
@@ -536,31 +548,80 @@ poetry env remove python          # 刪除虛擬環境
 
 ```
 avatar/
-├── app/
-│   ├── main.py              # FastAPI 入口
-│   ├── websocket.py         # WebSocket 處理
-│   ├── api/
-│   │   ├── chat.py          # REST API
-│   │   └── voice.py
-│   ├── services/
-│   │   ├── stt.py           # Whisper 調用
-│   │   ├── llm.py           # vLLM 調用
-│   │   └── tts.py           # TTS 調用
-│   ├── db.py                # SQLite 操作
-│   └── config.py            # 配置管理
-├── audio/                   # 音檔存儲
+├── src/                     # Python 源碼 (符合 Python 包標準)
+│   └── avatar/              # 主應用程式包
+│       ├── __init__.py      # 包初始化
+│       ├── main.py          # FastAPI 入口點
+│       ├── api/             # API 端點層
+│       │   ├── __init__.py
+│       │   └── websocket.py # WebSocket 處理邏輯
+│       ├── core/            # 核心功能模組
+│       │   ├── __init__.py
+│       │   ├── config.py    # 配置管理 (含多 GPU 支援)
+│       │   ├── session_manager.py  # 會話管理
+│       │   └── audio_utils.py      # 音頻處理工具
+│       ├── services/        # AI 服務層
+│       │   ├── __init__.py
+│       │   ├── database.py  # SQLite 異步操作
+│       │   ├── stt.py       # Whisper STT 服務
+│       │   ├── llm.py       # vLLM 推理服務
+│       │   └── tts.py       # F5-TTS 語音合成服務
+│       └── models/          # Pydantic 資料模型
+│           ├── __init__.py
+│           └── messages.py  # WebSocket 消息模型
+├── audio/                   # 音檔存儲 (運行時資料)
 │   ├── raw/                 # 用戶原始錄音
-│   ├── profiles/            # 聲音樣本
-│   ├── tts_fast/            # 快速合成
-│   └── tts_hq/              # 高質合成
-├── scripts/
-│   └── download_models.py   # 模型下載腳本
-├── frontend/                # React 前端
-├── .venv/                   # Poetry 虛擬環境（本地）
+│   ├── profiles/            # 聲音樣本檔案
+│   └── tts/                 # F5-TTS 合成輸出
+├── scripts/                 # Linus 式工具腳本管理
+│   ├── avatar-scripts       # 主控制腳本 (統一入口)
+│   ├── setup/               # 環境設置腳本
+│   │   ├── download_models.py     # AI 模型下載
+│   │   ├── validate_setup.py      # 環境完整性驗證
+│   │   ├── init_database.py       # SQLite 資料庫初始化
+│   │   ├── setup_cuda_wsl2.sh     # CUDA 環境設置 (Linux)
+│   │   └── setup_cuda_wsl2.ps1    # CUDA 環境設置 (Windows)
+│   ├── maintenance/         # 系統維護腳本
+│   │   ├── cleanup_cache.sh       # 智能快取清理
+│   │   ├── quick_cleanup.sh       # 快速清理
+│   │   └── linux_resource_cleanup.sh  # 深度資源清理
+│   ├── testing/             # 測試與驗證腳本
+│   │   ├── test_model_loading.py  # AI 模型載入測試
+│   │   ├── generate_test_audio.py # 測試音檔生成
+│   │   ├── create_simple_test_audio.py  # 簡單音檔測試
+│   │   └── run_tests.sh           # 完整測試套件
+│   ├── development/         # 開發工具 (預留擴展)
+│   └── README.md            # 腳本使用說明文檔
+├── tests/                   # 測試程式碼
+│   ├── unit/                # 單元測試
+│   ├── integration/         # 整合測試
+│   ├── websocket_e2e_test.py      # WebSocket E2E 測試
+│   ├── e2e_pipeline_test.py       # 完整管道測試
+│   └── quick_service_test.py      # 快速服務測試
+├── docs/                    # 項目文檔
+│   ├── planning/            # 規劃文檔
+│   │   └── mvp_tech_spec.md # MVP 技術規格 (本文件)
+│   ├── dev/                 # 開發文檔
+│   ├── setup/               # 設置指南
+│   └── launch/              # 部署指南
+├── .claude/                 # TaskMaster 協作資料
+│   ├── taskmaster-data/     # 任務管理資料
+│   │   ├── project.json     # 專案配置
+│   │   └── wbs-todos.json   # WBS 任務清單
+│   ├── context/             # 上下文資料
+│   └── hooks/               # 自動化鉤子
+├── frontend/                # React 前端 (預留)
+│   ├── src/
+│   ├── public/
+│   └── package.json
+├── data/                    # 數據存儲
+├── .venv/                   # Poetry 虛擬環境 (本地)
 ├── pyproject.toml           # Poetry 專案配置
-├── poetry.lock              # 依賴鎖定檔案
-├── .gitignore
-└── README.md
+├── poetry.lock              # 依賴版本鎖定
+├── app.db                   # SQLite 資料庫檔案
+├── .gitignore               # Git 忽略規則
+├── CLAUDE.md                # TaskMaster 專案配置檔案
+└── README.md                # 專案說明文檔
 ```
 
 ### pyproject.toml 範例
@@ -593,7 +654,7 @@ websockets = ">=12.0"
 aiosqlite = ">=0.19.0"  # Async SQLite
 
 # AI Models (僅介面，實際透過外部服務)
-# vLLM, faster-whisper, F5-TTS, CosyVoice3 需另外安裝
+# vLLM, faster-whisper, F5-TTS 需另外安裝
 
 # Data Processing
 numpy = ">=1.24.0"
@@ -627,7 +688,7 @@ ruff = ">=0.1.0"
 # 4. 安裝 AI 模型套件:
 #    pip install vllm>=0.6.0
 #    pip install faster-whisper
-#    # F5-TTS 和 CosyVoice3 參考官方 repo 安裝
+#    # F5-TTS 參考官方 repo 安裝
 #
 # 5. 驗證安裝:
 #    python -c "import torch, vllm; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
@@ -863,12 +924,13 @@ conn.close()
 
 ### C8. 模型下載失敗
 
-**問題**: `scripts/download_models.py` 下載超時
+**問題**: 模型下載超時
 **解決方案**:
 ```bash
 # 方法 1: 使用 HuggingFace 鏡像
 export HF_ENDPOINT=https://hf-mirror.com
-python scripts/download_models.py
+./scripts/avatar-scripts setup-env
+# 或：python scripts/setup/download_models.py
 
 # 方法 2: 手動下載並放置
 # 1. 從 Hugging Face 下載模型
@@ -877,7 +939,7 @@ python scripts/download_models.py
 # 方法 3: 使用代理
 export HTTP_PROXY=http://127.0.0.1:7890
 export HTTPS_PROXY=http://127.0.0.1:7890
-python scripts/download_models.py
+./scripts/avatar-scripts setup-env
 ```
 
 ---
@@ -930,7 +992,11 @@ sys.exit(0)
 
 執行驗證:
 ```bash
-python scripts/validate_setup.py
+# 方法 A: 使用主控制腳本（推薦）
+./scripts/avatar-scripts dev-validate
+
+# 方法 B: 直接執行腳本
+python scripts/setup/validate_setup.py
 ```
 
 ---

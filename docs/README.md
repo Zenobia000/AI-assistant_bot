@@ -13,8 +13,10 @@ docs/
 ├── README.md                              # 本文件（導覽）
 ├── planning/
 │   └── mvp_tech_spec.md                   # MVP 技術規格（核心契約）
-├── dev/
-│   └── development_progress_report.md     # 開發進度報告（透明化）
+├── dev/                                   # 開發文檔
+│   ├── development_progress_report.md     # 開發進度報告
+│   ├── progress_phase2_complete.md        # Phase 2 完成報告
+│   └── architecture_review_task13.md     # Task 13 架構審查
 └── launch/
     └── mvp_launch_checklist.md            # 上線檢查清單（品質門禁）
 ```
