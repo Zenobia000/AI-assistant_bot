@@ -6,6 +6,7 @@ Supports streaming responses for low Time-To-First-Token (TTFT).
 """
 
 import asyncio
+import uuid
 from typing import AsyncIterator, Optional
 
 import structlog
@@ -127,8 +128,8 @@ class LLMService:
         )
 
         try:
-            # Generate using async engine
-            request_id = f"req-{asyncio.current_task().get_name()}"
+            # Generate using async engine with unique request ID
+            request_id = f"req-{uuid.uuid4().hex[:8]}"
             results_generator = self._engine.generate(
                 prompt,
                 sampling_params,
@@ -192,7 +193,8 @@ class LLMService:
         )
 
         try:
-            request_id = f"stream-{asyncio.current_task().get_name()}"
+            # Generate unique request ID to avoid conflicts
+            request_id = f"stream-{uuid.uuid4().hex[:8]}"
             results_generator = self._engine.generate(
                 prompt,
                 sampling_params,

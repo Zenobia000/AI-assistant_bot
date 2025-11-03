@@ -176,6 +176,50 @@ class SessionManager:
             "vram": vram_info
         }
 
+    def get_vram_status(self) -> dict:
+        """
+        Get VRAM status (convenience method for monitoring)
+
+        Returns:
+            Dictionary with VRAM information:
+            - total_gb: Total VRAM in GB
+            - used_gb: Allocated VRAM in GB
+            - free_gb: Free VRAM in GB
+            - usage_percent: Usage percentage
+        """
+        if not torch.cuda.is_available():
+            return {
+                "total_gb": 0.0,
+                "used_gb": 0.0,
+                "free_gb": 0.0,
+                "usage_percent": 0.0
+            }
+
+        allocated_gb = torch.cuda.memory_allocated(0) / 1024**3
+        total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        free_gb = total_gb - allocated_gb
+        usage_pct = (allocated_gb / total_gb) * 100
+
+        return {
+            "total_gb": round(total_gb, 2),
+            "used_gb": round(allocated_gb, 2),
+            "free_gb": round(free_gb, 2),
+            "usage_percent": round(usage_pct, 1)
+        }
+
+    async def try_acquire_session(self, session_id: str, timeout: float = 1.0) -> bool:
+        """
+        Alias for acquire_session() (convenience method for tests)
+
+        Args:
+            session_id: Unique session identifier
+            timeout: Timeout in seconds
+
+        Returns:
+            True if session acquired, False otherwise
+        """
+        return await self.acquire_session(session_id, timeout)
+
 
 # Global singleton instance
 # Linus would approve: simple, no factory pattern, just a global
