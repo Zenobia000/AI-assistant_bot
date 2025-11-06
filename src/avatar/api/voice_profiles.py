@@ -13,16 +13,22 @@ from typing import List, Optional
 from uuid import uuid4
 
 import structlog
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from avatar.core.config import config
+from avatar.core.security import verify_api_token, validate_input_string, safe_error_response
 from avatar.services.database import get_database_service
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/voice-profiles", tags=["voice-profiles"])
+
+# Rate limiter for voice profiles API
+limiter = Limiter(key_func=get_remote_address)
 
 
 # Models
@@ -54,24 +60,47 @@ class VoiceProfileList(BaseModel):
 # Utility Functions
 def validate_audio_file(file: UploadFile) -> None:
     """
-    Validate uploaded audio file format and size
+    Validate uploaded audio file format and size with enhanced security
 
     Args:
         file: Uploaded audio file
 
     Raises:
-        HTTPException: If file is invalid
+        HTTPException: If file is invalid or potentially malicious
     """
-    # Check file size (max 10MB)
-    if file.size and file.size > 10 * 1024 * 1024:
+    # Check filename is provided
+    if not file.filename or not file.filename.strip():
         raise HTTPException(
             status_code=400,
+            detail="Filename is required"
+        )
+
+    # Sanitize filename - prevent path traversal
+    import re
+    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', file.filename)
+    if '..' in file.filename or '/' in file.filename or '\\' in file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid filename. Path traversal detected."
+        )
+
+    # Check file size (max 10MB) - strict enforcement
+    if file.size and file.size > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,  # Payload Too Large
             detail="File size too large. Maximum 10MB allowed."
         )
 
-    # Check file extension
+    # Minimum file size check (audio should be at least 1KB)
+    if file.size and file.size < 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="File too small. Minimum 1KB required for valid audio."
+        )
+
+    # Check file extension - strict whitelist
     allowed_extensions = {'.wav', '.mp3', '.m4a', '.flac', '.ogg'}
-    file_ext = Path(file.filename or "").suffix.lower()
+    file_ext = Path(safe_filename).suffix.lower()
 
     if file_ext not in allowed_extensions:
         raise HTTPException(
@@ -79,26 +108,33 @@ def validate_audio_file(file: UploadFile) -> None:
             detail=f"Unsupported file format. Allowed: {', '.join(allowed_extensions)}"
         )
 
-    # Check MIME type (allow application/octet-stream for audio files)
+    # Check MIME type - strict validation
     allowed_mime_types = {
         'audio/wav', 'audio/wave', 'audio/x-wav',
         'audio/mpeg', 'audio/mp3',
         'audio/mp4', 'audio/m4a',
         'audio/flac',
-        'audio/ogg', 'audio/vorbis',
-        'application/octet-stream'  # Allow generic binary upload
+        'audio/ogg', 'audio/vorbis'
+        # Removed 'application/octet-stream' for security
     }
 
-    if file.content_type and file.content_type not in allowed_mime_types:
+    if not file.content_type or file.content_type not in allowed_mime_types:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid MIME type: {file.content_type}"
+            detail=f"Invalid or missing MIME type. Expected audio/* types."
         )
+
+    logger.info(
+        "voice_profile.file_validated",
+        filename=safe_filename,
+        size=file.size,
+        mime_type=file.content_type
+    )
 
 
 async def save_audio_file(file: UploadFile, profile_id: str) -> Path:
     """
-    Save uploaded audio file to voice profiles directory
+    Save uploaded audio file to voice profiles directory with security checks
 
     Args:
         file: Uploaded audio file
@@ -106,18 +142,77 @@ async def save_audio_file(file: UploadFile, profile_id: str) -> Path:
 
     Returns:
         Path to saved file
+
+    Raises:
+        HTTPException: If file cannot be saved securely
     """
-    # Create profile directory
+    import re
+
+    # Validate profile_id format (UUID only)
+    if not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', profile_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid profile ID format"
+        )
+
+    # Sanitize filename
+    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', file.filename or "audio.wav")
+    file_ext = Path(safe_filename).suffix.lower()
+
+    # Create profile directory with secure path
     profile_dir = config.AUDIO_PROFILES / profile_id
+
+    # Ensure profile_dir is within AUDIO_PROFILES (prevent directory traversal)
+    try:
+        profile_dir = profile_dir.resolve()
+        audio_profiles_real = config.AUDIO_PROFILES.resolve()
+        if not str(profile_dir).startswith(str(audio_profiles_real)):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid profile directory path"
+            )
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid profile directory"
+        )
+
     profile_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate filename with original extension
-    file_ext = Path(file.filename or "audio.wav").suffix.lower()
+    # Generate secure filename
     audio_path = profile_dir / f"reference{file_ext}"
 
-    # Save file
-    with open(audio_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    # Read and validate file content
+    try:
+        content = await file.read()
+
+        # Basic audio file header validation
+        if file_ext == '.wav' and not content.startswith(b'RIFF'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid WAV file format"
+            )
+        elif file_ext == '.mp3' and not (content.startswith(b'ID3') or content.startswith(b'\xff\xfb')):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid MP3 file format"
+            )
+
+        # Save file with secure permissions
+        with open(audio_path, "wb") as buffer:
+            buffer.write(content)
+
+        # Set restrictive file permissions (owner read/write only)
+        audio_path.chmod(0o600)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("voice_profile.save_failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save audio file"
+        )
 
     logger.info(
         "voice_profile.audio_saved",
@@ -150,12 +245,15 @@ async def save_reference_text(profile_dir: Path, reference_text: str):
 
 # API Endpoints
 @router.post("", response_model=VoiceProfileResponse)
+@limiter.limit("5/minute")  # Limited for file upload
 async def create_voice_profile(
+    request: Request,
     name: str = Form(...),
     description: Optional[str] = Form(None),
     reference_text: Optional[str] = Form(None),
     audio_file: UploadFile = File(...),
-    db = Depends(get_database_service)
+    db = Depends(get_database_service),
+    authenticated: bool = Depends(verify_api_token)
 ):
     """
     Create a new voice profile
@@ -173,6 +271,13 @@ async def create_voice_profile(
     logger.info("voice_profile.create_start", name=name)
 
     try:
+        # Validate and sanitize inputs
+        name = validate_input_string(name, "name", max_length=100)
+        if description:
+            description = validate_input_string(description, "description", max_length=500)
+        if reference_text:
+            reference_text = validate_input_string(reference_text, "reference_text", max_length=1000)
+
         # Validate audio file
         validate_audio_file(audio_file)
 
@@ -210,23 +315,30 @@ async def create_voice_profile(
 
         return VoiceProfileResponse(**profile_data)
 
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is (they're safe)
+        raise
     except Exception as e:
         logger.error("voice_profile.create_failed", error=str(e), name=name)
+
         # Cleanup on failure
         try:
             profile_dir = config.AUDIO_PROFILES / profile_id
             if profile_dir.exists():
                 shutil.rmtree(profile_dir)
-        except:
+        except Exception:
+            # Silent cleanup failure - don't expose details
             pass
 
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail="Failed to create voice profile")
+        # Return safe error message
+        safe_detail = safe_error_response(str(e), include_detail=False)
+        raise HTTPException(status_code=500, detail=safe_detail)
 
 
 @router.get("", response_model=VoiceProfileList)
+@limiter.limit("20/minute")
 async def list_voice_profiles(
+    request: Request,
     limit: int = 50,
     offset: int = 0,
     db = Depends(get_database_service)
@@ -264,7 +376,8 @@ async def list_voice_profiles(
 
     except Exception as e:
         logger.error("voice_profile.list_failed", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to retrieve voice profiles")
+        safe_detail = safe_error_response(str(e), include_detail=False)
+        raise HTTPException(status_code=500, detail=safe_detail)
 
 
 @router.get("/{profile_id}", response_model=VoiceProfileResponse)
@@ -300,7 +413,8 @@ async def get_voice_profile(
         raise
     except Exception as e:
         logger.error("voice_profile.get_failed", error=str(e), profile_id=profile_id)
-        raise HTTPException(status_code=500, detail="Failed to retrieve voice profile")
+        safe_detail = safe_error_response(str(e), include_detail=False)
+        raise HTTPException(status_code=500, detail=safe_detail)
 
 
 @router.get("/{profile_id}/audio")
@@ -362,7 +476,8 @@ async def update_voice_profile(
     description: Optional[str] = Form(None),
     reference_text: Optional[str] = Form(None),
     audio_file: Optional[UploadFile] = File(None),
-    db = Depends(get_database_service)
+    db = Depends(get_database_service),
+    authenticated: bool = Depends(verify_api_token)
 ):
     """
     Update an existing voice profile
@@ -426,13 +541,15 @@ async def update_voice_profile(
         raise
     except Exception as e:
         logger.error("voice_profile.update_failed", error=str(e), profile_id=profile_id)
-        raise HTTPException(status_code=500, detail="Failed to update voice profile")
+        safe_detail = safe_error_response(str(e), include_detail=False)
+        raise HTTPException(status_code=500, detail=safe_detail)
 
 
 @router.delete("/{profile_id}")
 async def delete_voice_profile(
     profile_id: str,
-    db = Depends(get_database_service)
+    db = Depends(get_database_service),
+    authenticated: bool = Depends(verify_api_token)
 ):
     """
     Delete a voice profile and its associated files
@@ -470,14 +587,18 @@ async def delete_voice_profile(
         raise
     except Exception as e:
         logger.error("voice_profile.delete_failed", error=str(e), profile_id=profile_id)
-        raise HTTPException(status_code=500, detail="Failed to delete voice profile")
+        safe_detail = safe_error_response(str(e), include_detail=False)
+        raise HTTPException(status_code=500, detail=safe_detail)
 
 
 @router.post("/{profile_id}/test")
+@limiter.limit("3/minute")  # Limited for synthesis
 async def test_voice_profile(
+    request: Request,
     profile_id: str,
     text: str = Form(..., max_length=500),
-    db = Depends(get_database_service)
+    db = Depends(get_database_service),
+    authenticated: bool = Depends(verify_api_token)
 ):
     """
     Test voice profile by generating a sample audio

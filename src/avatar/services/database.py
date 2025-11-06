@@ -506,6 +506,144 @@ class DatabaseService:
 
         return success
 
+    # Additional conversation operations for API
+
+    async def get_recent_conversation_sessions(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Get recent conversation sessions with metadata"""
+        if not self._conn:
+            await self.connect()
+
+        cursor = await self._conn.execute(
+            """
+            SELECT
+                c.session_id,
+                COUNT(*) as turn_count,
+                MIN(c.created_at) as first_created_at,
+                MAX(c.created_at) as last_created_at,
+                MIN(c.user_text) as first_user_message,
+                vp.name as voice_profile_name
+            FROM conversations c
+            LEFT JOIN voice_profiles_v2 vp ON c.voice_profile_id = vp.id
+            GROUP BY c.session_id
+            ORDER BY last_created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        )
+
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def count_conversation_sessions(self) -> int:
+        """Count total conversation sessions"""
+        if not self._conn:
+            await self.connect()
+
+        cursor = await self._conn.execute(
+            "SELECT COUNT(DISTINCT session_id) FROM conversations"
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def count_conversation_turns(self) -> int:
+        """Count total conversation turns"""
+        if not self._conn:
+            await self.connect()
+
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM conversations")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def search_conversations(self, query: str, limit: int = 20, offset: int = 0) -> list[dict]:
+        """Search conversations by text content"""
+        if not self._conn:
+            await self.connect()
+
+        # Use FTS if available, otherwise simple LIKE search
+        cursor = await self._conn.execute(
+            """
+            SELECT
+                c.session_id,
+                COUNT(*) as turn_count,
+                MIN(c.created_at) as created_at,
+                MAX(c.created_at) as last_activity,
+                c.user_text as matched_text,
+                vp.name as voice_profile_name
+            FROM conversations c
+            LEFT JOIN voice_profiles_v2 vp ON c.voice_profile_id = vp.id
+            WHERE c.user_text LIKE ? OR c.ai_text LIKE ?
+            GROUP BY c.session_id
+            ORDER BY last_activity DESC
+            LIMIT ? OFFSET ?
+            """,
+            (f"%{query}%", f"%{query}%", limit, offset),
+        )
+
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def count_search_results(self, query: str) -> int:
+        """Count search results"""
+        if not self._conn:
+            await self.connect()
+
+        cursor = await self._conn.execute(
+            """
+            SELECT COUNT(DISTINCT session_id)
+            FROM conversations
+            WHERE user_text LIKE ? OR ai_text LIKE ?
+            """,
+            (f"%{query}%", f"%{query}%"),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def count_recent_sessions(self, hours: int = 24) -> int:
+        """Count sessions in recent hours"""
+        if not self._conn:
+            await self.connect()
+
+        cutoff_time = int(time.time()) - (hours * 3600)
+        cursor = await self._conn.execute(
+            """
+            SELECT COUNT(DISTINCT session_id)
+            FROM conversations
+            WHERE created_at >= ?
+            """,
+            (cutoff_time,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def count_recent_turns(self, hours: int = 24) -> int:
+        """Count turns in recent hours"""
+        if not self._conn:
+            await self.connect()
+
+        cutoff_time = int(time.time()) - (hours * 3600)
+        cursor = await self._conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE created_at >= ?",
+            (cutoff_time,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def delete_conversation_session(self, session_id: str) -> bool:
+        """Delete all turns for a conversation session"""
+        if not self._conn:
+            await self.connect()
+
+        cursor = await self._conn.execute(
+            "DELETE FROM conversations WHERE session_id = ?",
+            (session_id,),
+        )
+        await self._conn.commit()
+
+        success = cursor.rowcount > 0
+        if success:
+            logger.info("db.conversation_session.deleted", session_id=session_id, rows=cursor.rowcount)
+        return success
+
     async def _ensure_voice_profiles_v2_schema(self):
         """Ensure voice_profiles_v2 table exists"""
         await self._conn.execute(

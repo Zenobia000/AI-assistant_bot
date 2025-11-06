@@ -13,7 +13,8 @@ class Config:
     """Application configuration"""
 
     # Project paths
-    BASE_DIR = Path(__file__).parent.parent.parent.parent
+    PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+    BASE_DIR = PROJECT_ROOT  # Alias for backward compatibility
     AUDIO_DIR = BASE_DIR / "audio"
     AUDIO_RAW = AUDIO_DIR / "raw"
     AUDIO_PROFILES = AUDIO_DIR / "profiles"
@@ -56,11 +57,11 @@ class Config:
 
     # TTS settings
     F5_TTS_SPEED: float = float(os.getenv("AVATAR_F5_SPEED", "1.0"))
-    COSYVOICE_SAMPLE_RATE: int = int(os.getenv("AVATAR_COSY_SAMPLE_RATE", "22050"))
+    COSYVOICE_SAMPLE_RATE: int = int(os.getenv("AVATAR_COSY_SAMPLE_RATE", "24000"))  # CosyVoice2 uses 24kHz
 
-    # TTS Quality Mode Settings
-    TTS_ENABLE_HQ_MODE: bool = bool(os.getenv("AVATAR_TTS_ENABLE_HQ", "false").lower() == "true")
-    TTS_HQ_MODEL_NAME: str = os.getenv("AVATAR_TTS_HQ_MODEL", "CosyVoice-300M")
+    # TTS Quality Mode Settings (CosyVoice2)
+    TTS_ENABLE_HQ_MODE: bool = bool(os.getenv("AVATAR_TTS_ENABLE_HQ", "true").lower() == "true")  # Enable by default
+    TTS_HQ_MODEL_PATH: str = os.getenv("AVATAR_TTS_HQ_MODEL", "CosyVoice/pretrained_models/CosyVoice2-0.5B")
 
     # Performance thresholds (KPIs)
     TARGET_E2E_LATENCY_SEC: float = 3.5  # P95 target

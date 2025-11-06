@@ -1,0 +1,15 @@
+Conversation Export: test-session-1762407116
+Exported: 2025-11-06T05:31:56.037334
+==================================================
+
+Turn 3 - 2025-11-06 13:31:56
+User: User message 3 for testing conversation API
+AI: AI response 3 to user's query about testing
+
+Turn 2 - 2025-11-06 13:31:56
+User: User message 2 for testing conversation API
+AI: AI response 2 to user's query about testing
+
+Turn 1 - 2025-11-06 13:31:56
+User: User message 1 for testing conversation API
+AI: AI response 1 to user's query about testing

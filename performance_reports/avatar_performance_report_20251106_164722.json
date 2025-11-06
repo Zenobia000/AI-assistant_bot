@@ -1,0 +1,230 @@
+{
+  "report_metadata": {
+    "generated_at": "2025-11-06T16:47:22.216777",
+    "avatar_version": "1.0.0",
+    "test_environment": "development",
+    "report_type": "comprehensive_performance_analysis"
+  },
+  "executive_summary": {
+    "overall_status": "EXCELLENT",
+    "e2e_performance": {
+      "p95_latency": "2.547s",
+      "sla_compliance": true,
+      "margin": "0.953s"
+    },
+    "reliability": {
+      "success_rate": "98.0%",
+      "acceptable": true
+    },
+    "key_findings": [
+      "\u2705 E2E P95 latency 2.547s meets SLA target (\u22643.5s)"
+    ],
+    "priority_actions": [
+      "Focus optimization on TTS component (P95: 1.300s)"
+    ]
+  },
+  "sla_compliance": {
+    "overall_compliance": 90.0,
+    "compliant_targets": 9,
+    "total_targets": 10,
+    "detailed_compliance": {
+      "e2e_p95_latency": {
+        "target": 3.5,
+        "current": 2.547007942199707,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.9529920578002931,
+        "priority": "critical"
+      },
+      "e2e_p50_latency": {
+        "target": 2.0,
+        "current": 2.047007942199707,
+        "unit": "seconds",
+        "compliant": false,
+        "margin": -0.04700794219970694,
+        "priority": "high"
+      },
+      "stt_max_latency": {
+        "target": 0.6,
+        "current": 0.45,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.14999999999999997,
+        "priority": "high"
+      },
+      "stt_rtf": {
+        "target": 0.5,
+        "current": 0.4,
+        "unit": "ratio",
+        "compliant": true,
+        "margin": 0.09999999999999998,
+        "priority": "medium"
+      },
+      "llm_ttft": {
+        "target": 0.8,
+        "current": 0.65,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.15000000000000002,
+        "priority": "critical"
+      },
+      "tts_max_latency": {
+        "target": 1.5,
+        "current": 1.3,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.19999999999999996,
+        "priority": "high"
+      },
+      "tts_synthesis_ratio": {
+        "target": 1.0,
+        "current": 0.85,
+        "unit": "ratio",
+        "compliant": true,
+        "margin": 0.15000000000000002,
+        "priority": "medium"
+      },
+      "database_p95_latency": {
+        "target": 0.05,
+        "current": 0,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.05,
+        "priority": "medium"
+      },
+      "filesystem_p95_latency": {
+        "target": 0.1,
+        "current": 0.01572563648223877,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.08427436351776124,
+        "priority": "low"
+      },
+      "memory_p95_latency": {
+        "target": 0.05,
+        "current": 0.016903614997863768,
+        "unit": "seconds",
+        "compliant": true,
+        "margin": 0.033096385002136235,
+        "priority": "low"
+      }
+    }
+  },
+  "component_analysis": {
+    "stt": {
+      "performance_class": "excellent",
+      "latency_p95": 0.45,
+      "latency_p50": 0.35,
+      "success_rate": 98.5,
+      "optimization_potential": "low",
+      "specific_metrics": {
+        "real_time_factor": 0.4,
+        "model_type": "Whisper (CPU)"
+      }
+    },
+    "llm": {
+      "performance_class": "good",
+      "latency_p95": 0.75,
+      "latency_p50": 0.55,
+      "success_rate": 99.2,
+      "optimization_potential": "low",
+      "specific_metrics": {
+        "time_to_first_token": 0.65,
+        "tokens_per_second": 18.5,
+        "model_type": "vLLM"
+      }
+    },
+    "tts": {
+      "performance_class": "acceptable",
+      "latency_p95": 1.3,
+      "latency_p50": 1.1,
+      "success_rate": 97.8,
+      "optimization_potential": "low",
+      "specific_metrics": {
+        "synthesis_ratio": 0.85,
+        "model_type": "F5-TTS"
+      }
+    }
+  },
+  "bottleneck_analysis": {
+    "primary_bottleneck": {
+      "rank": 1,
+      "component": "tts",
+      "latency_p95": 1.3,
+      "percentage_of_e2e": 51.04028057632453,
+      "severity": "critical"
+    },
+    "all_bottlenecks": [
+      {
+        "rank": 1,
+        "component": "tts",
+        "latency_p95": 1.3,
+        "percentage_of_e2e": 51.04028057632453,
+        "severity": "critical"
+      },
+      {
+        "rank": 2,
+        "component": "llm",
+        "latency_p95": 0.75,
+        "percentage_of_e2e": 29.446315717110306,
+        "severity": "high"
+      },
+      {
+        "rank": 3,
+        "component": "stt",
+        "latency_p95": 0.45,
+        "percentage_of_e2e": 17.667789430266183,
+        "severity": "medium"
+      }
+    ],
+    "optimization_priority": [
+      "tts",
+      "llm",
+      "stt"
+    ]
+  },
+  "optimization_roadmap": {
+    "immediate_actions": [
+      "Optimize TTS batch processing",
+      "Review GPU memory allocation",
+      "Implement streaming synthesis"
+    ],
+    "short_term": [
+      "Implement model caching strategies",
+      "Optimize VRAM allocation patterns",
+      "Add performance monitoring dashboards"
+    ],
+    "long_term": [
+      "Evaluate alternative model architectures",
+      "Implement horizontal scaling",
+      "Advanced GPU optimization"
+    ]
+  },
+  "performance_insights": [],
+  "recommendations": {
+    "performance_optimization": [
+      "Implement model pre-loading to reduce cold start latency",
+      "Add request batching for improved throughput",
+      "Optimize GPU memory allocation patterns",
+      "Implement intelligent caching strategies"
+    ],
+    "infrastructure_improvements": [
+      "Upgrade to faster storage (NVMe SSD) for model loading",
+      "Optimize database connection pooling",
+      "Implement proper async I/O patterns",
+      "Add monitoring and alerting for performance metrics"
+    ],
+    "monitoring_and_observability": [
+      "Implement real-time performance dashboards",
+      "Add detailed latency breakdowns by component",
+      "Set up automated performance regression testing",
+      "Create SLA compliance monitoring"
+    ],
+    "scalability_preparation": [
+      "Design for horizontal scaling of compute-intensive components",
+      "Implement load balancing for multiple model instances",
+      "Prepare for auto-scaling based on demand",
+      "Plan for model versioning and A/B testing"
+    ]
+  }
+}

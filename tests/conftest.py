@@ -2,12 +2,14 @@
 Test Configuration and Fixtures for AVATAR
 
 Provides FastAPI test client, database fixtures, and mock services.
+Enhanced with GPU memory management for reliable testing.
 """
 
 import asyncio
 import pytest
 import tempfile
 import shutil
+import os
 from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
@@ -18,12 +20,56 @@ from httpx import AsyncClient
 
 # Add src to path for imports
 import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Import AVATAR components
 from avatar.main import app
 from avatar.core.config import Config
+
+
+# GPU Memory Management for Tests
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_environment():
+    """Setup test environment with proper GPU management"""
+
+    # Set test environment variables
+    os.environ["AVATAR_ENV"] = "test"
+    os.environ["AVATAR_API_TOKEN"] = "test-integration-token"
+
+    # Reduce VRAM allocation for tests
+    os.environ["AVATAR_VLLM_MEMORY"] = "0.2"  # 20% instead of 50%
+    os.environ["AVATAR_MAX_SESSIONS"] = "1"   # Only 1 concurrent session in tests
+
+    yield
+
+    # Cleanup GPU memory after all tests
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("🧹 GPU memory cleaned after tests")
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def clear_gpu_memory():
+    """Clear GPU memory before and after each test"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    yield
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")
@@ -106,11 +152,12 @@ async def async_client(test_config) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
+# Mock services for unit testing (without actual model loading)
 @pytest.fixture
 def mock_whisper_service():
     """Mock Whisper STT service"""
     mock = AsyncMock()
-    mock.transcribe.return_value = "Hello, this is a test transcription."
+    mock.transcribe.return_value = ("Hello, this is a test transcription.", {"language": "en"})
     return mock
 
 
@@ -119,9 +166,12 @@ def mock_vllm_service():
     """Mock vLLM inference service"""
     mock = AsyncMock()
     mock.generate.return_value = "This is a test AI response."
-    mock.generate_stream.return_value = async_generator_mock([
-        "This ", "is ", "a ", "test ", "AI ", "response."
-    ])
+
+    async def mock_stream(messages, **kwargs):
+        for word in ["This ", "is ", "a ", "test ", "AI ", "response."]:
+            yield word
+
+    mock.chat_stream = mock_stream
     return mock
 
 
@@ -129,7 +179,8 @@ def mock_vllm_service():
 def mock_f5_tts_service():
     """Mock F5-TTS service"""
     mock = AsyncMock()
-    mock.synthesize.return_value = b"fake_audio_data"
+    mock.synthesize.return_value = Path("/fake/audio/output.wav")
+    mock.synthesize_fast.return_value = Path("/fake/audio/output.wav")
     return mock
 
 
@@ -137,7 +188,8 @@ def mock_f5_tts_service():
 def mock_cosyvoice_service():
     """Mock CosyVoice service"""
     mock = AsyncMock()
-    mock.synthesize.return_value = b"fake_hq_audio_data"
+    mock.synthesize.return_value = Path("/fake/audio/hq_output.wav")
+    mock.synthesize_hq.return_value = Path("/fake/audio/hq_output.wav")
     return mock
 
 
@@ -146,9 +198,9 @@ def mock_gpu_monitor():
     """Mock GPU monitoring"""
     mock = MagicMock()
     mock.get_memory_info.return_value = {
-        'total': 24576,  # 24GB in MB
-        'used': 8192,    # 8GB used
-        'free': 16384    # 16GB free
+        'total': 20480,  # 20GB in MB
+        'used': 2048,    # 2GB used
+        'free': 18432    # 18GB free
     }
     mock.is_memory_available.return_value = True
     return mock
@@ -171,6 +223,26 @@ def sample_audio_data():
     audio_int16 = (audio * 32767).astype(np.int16)
 
     return audio_int16.tobytes()
+
+
+@pytest.fixture
+def sample_wav_file(test_config, sample_audio_data):
+    """Create a sample WAV file for testing"""
+    import wave
+
+    wav_path = test_config.AUDIO_RAW / "test_sample.wav"
+
+    # Create WAV file
+    with wave.open(str(wav_path), 'wb') as wav_file:
+        wav_file.setnchannels(1)  # Mono
+        wav_file.setsampwidth(2)  # 2 bytes per sample (int16)
+        wav_file.setframerate(16000)  # 16kHz
+        wav_file.writeframes(sample_audio_data)
+
+    yield wav_path
+
+    # Cleanup
+    wav_path.unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -207,7 +279,6 @@ class MockWebSocket:
             self.messages.append(('bytes', data))
 
     async def receive_text(self):
-        # For testing, return a sample message
         return '{"type": "audio_chunk", "session_id": "test", "data": "fake_base64_audio"}'
 
     async def receive_bytes(self):
@@ -223,7 +294,6 @@ def mock_websocket():
     return MockWebSocket()
 
 
-# Performance testing utilities
 @pytest.fixture
 def performance_timer():
     """Timer for performance testing"""
@@ -249,7 +319,7 @@ def performance_timer():
     return Timer()
 
 
-# Skip marks for different environments
+# Test markers configuration
 def pytest_configure(config):
     """Configure pytest markers"""
     config.addinivalue_line(
@@ -258,3 +328,25 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: mark test as slow running"
     )
+    config.addinivalue_line(
+        "markers", "integration: mark test as integration test"
+    )
+    config.addinivalue_line(
+        "markers", "unit: mark test as unit test"
+    )
+
+
+# Skip GPU tests if CUDA not available
+def pytest_collection_modifyitems(config, items):
+    """Skip GPU tests if CUDA not available"""
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+    except ImportError:
+        cuda_available = False
+
+    if not cuda_available:
+        skip_gpu = pytest.mark.skip(reason="CUDA not available")
+        for item in items:
+            if "gpu_required" in item.keywords:
+                item.add_marker(skip_gpu)

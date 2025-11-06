@@ -36,27 +36,27 @@ class TTSHQService:
 
     def __init__(
         self,
-        model_name: str = "CosyVoice-300M",
+        model_path: Optional[str] = None,
         device: Optional[str] = None,
-        sample_rate: int = config.COSYVOICE_SAMPLE_RATE
+        sample_rate: Optional[int] = None
     ):
         """
         Initialize HQ TTS service
 
         Args:
-            model_name: CosyVoice model variant
+            model_path: Path to CosyVoice2 model directory (uses config default if None)
             device: Device for inference (auto-detect GPU if available)
-            sample_rate: Output audio sample rate
+            sample_rate: Output audio sample rate (uses config default if None)
         """
-        self.model_name = model_name
+        self.model_path = Path(model_path or config.TTS_HQ_MODEL_PATH)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.sample_rate = sample_rate
-        self._model = None  # Will hold CosyVoice instance
+        self.sample_rate = sample_rate or config.COSYVOICE_SAMPLE_RATE
+        self._model = None  # Will hold CosyVoice2 instance
 
         logger.info(
             "tts_hq.init",
             device=self.device,
-            model=self.model_name,
+            model_path=str(self.model_path),
             sample_rate=self.sample_rate
         )
 
@@ -75,30 +75,37 @@ class TTSHQService:
         if self._model is not None:
             return
 
-        logger.info("tts_hq.loading_model", model=self.model_name)
+        logger.info("tts_hq.loading_model", model_path=str(self.model_path))
 
-        # Load CosyVoice model in executor to avoid blocking
+        # Load CosyVoice2 model in executor to avoid blocking
         loop = asyncio.get_event_loop()
 
         def _load_model():
             try:
-                # Import CosyVoice (assumed to be installed separately)
-                from cosyvoice.cli.cosyvoice import CosyVoice
+                import sys
 
-                # Initialize model
-                model = CosyVoice(self.model_name, device=self.device)
+                # Add CosyVoice paths to Python path
+                cosyvoice_root = config.PROJECT_ROOT / "CosyVoice"
+                sys.path.append(str(cosyvoice_root))
+                sys.path.append(str(cosyvoice_root / "third_party" / "Matcha-TTS"))
+
+                # Import CosyVoice2
+                from cosyvoice.cli.cosyvoice import CosyVoice2
+
+                # Initialize CosyVoice2 model
+                model = CosyVoice2(str(self.model_path))
                 return model
 
             except ImportError as e:
                 raise RuntimeError(
-                    f"CosyVoice not installed. Please install CosyVoice: {e}"
+                    f"CosyVoice2 not available. Please check CosyVoice installation: {e}"
                 )
             except Exception as e:
-                raise RuntimeError(f"Failed to load CosyVoice model: {e}")
+                raise RuntimeError(f"Failed to load CosyVoice2 model: {e}")
 
         try:
             self._model = await loop.run_in_executor(None, _load_model)
-            logger.info("tts_hq.model_loaded", device=self.device, model=self.model_name)
+            logger.info("tts_hq.model_loaded", device=self.device, model_path=str(self.model_path))
 
         except Exception as e:
             logger.error("tts_hq.model_load_failed", error=str(e))
@@ -157,17 +164,29 @@ class TTSHQService:
 
         def _synthesize():
             try:
-                # CosyVoice synthesis call
-                # This is a placeholder - actual API depends on CosyVoice implementation
-                audio_data = self._model.inference(
-                    text=text,
-                    ref_audio=str(ref_audio_path),
-                    ref_text=ref_text,
-                    mode=speaker_mode
+                import torchaudio
+
+                # Load reference audio
+                ref_audio, sr = torchaudio.load(str(ref_audio_path))
+                if sr != self.sample_rate:
+                    resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
+                    ref_audio = resampler(ref_audio)
+
+                # CosyVoice2 zero-shot synthesis
+                results = self._model.inference_zero_shot(
+                    text,           # Text to synthesize
+                    ref_text,       # Reference text
+                    ref_audio       # Reference audio tensor
                 )
 
+                # Convert generator to list and get first result
+                result_list = list(results)
+                if not result_list:
+                    raise RuntimeError("CosyVoice2 returned no results")
+
+                audio_data = result_list[0]['tts_speech']
+
                 # Save audio data to file
-                import torchaudio
                 torchaudio.save(
                     str(output_path),
                     audio_data,
@@ -177,7 +196,7 @@ class TTSHQService:
                 return output_path
 
             except Exception as e:
-                raise RuntimeError(f"CosyVoice synthesis failed: {e}")
+                raise RuntimeError(f"CosyVoice2 synthesis failed: {e}")
 
         try:
             result_path = await loop.run_in_executor(None, _synthesize)

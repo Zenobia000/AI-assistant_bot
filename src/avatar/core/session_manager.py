@@ -1,12 +1,21 @@
 """
-Session Manager for VRAM monitoring and concurrency control
+Enhanced Session Manager with Queue-based Concurrent Control
 
-Manages global session limits and VRAM usage to prevent OOM errors.
-Implements Linus-style simplicity: single responsibility, no special cases.
+Task 21: Integrated with SessionQueue for intelligent concurrent session management.
+Linus-style refactor: Remove duplicate VRAM logic, delegate to specialized components.
+
+Responsibilities:
+- Simple session acquisition/release
+- Integration with SessionQueue for queuing
+- Basic session tracking and status
+VRAM monitoring delegated to VRAMMonitor, queuing delegated to SessionQueue.
 """
 
 import asyncio
-from typing import Dict
+import time
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
 
 import structlog
 import torch
@@ -14,6 +23,38 @@ import torch
 from avatar.core.config import config
 
 logger = structlog.get_logger()
+
+
+class VRAMThreshold(Enum):
+    """VRAM usage threshold levels"""
+    SAFE = 70      # < 70% - Normal operation
+    WARNING = 85   # 70-85% - Start throttling
+    CRITICAL = 95  # 85-95% - Emergency throttling
+    DANGER = 98    # > 95% - Reject all new sessions
+
+
+@dataclass
+class VRAMStatus:
+    """VRAM status for a specific GPU"""
+    device_id: int
+    device_name: str
+    total_gb: float
+    allocated_gb: float
+    reserved_gb: float
+    free_gb: float
+    usage_percent: float
+    threshold: VRAMThreshold
+    can_accept_new: bool
+
+
+@dataclass
+class SessionLoad:
+    """Current session load information"""
+    active_sessions: int
+    max_sessions: int
+    load_percent: float
+    pending_requests: int
+    recent_rejections: int
 
 
 class SessionManager:
@@ -32,72 +73,97 @@ class SessionManager:
     - Fail fast when over capacity
     """
 
-    def __init__(self, max_sessions: int = None):
+    def __init__(self, max_sessions: int = None, vram_limit_gb: int = None):
         """
-        Initialize session manager
+        Initialize advanced session manager with multi-GPU support
 
         Args:
             max_sessions: Maximum concurrent sessions (default from config)
+            vram_limit_gb: VRAM limit per GPU in GB (default from config)
         """
         self.max_sessions = max_sessions or config.MAX_CONCURRENT_SESSIONS
-        self.active_sessions: Dict[str, bool] = {}
+        self.vram_limit_gb = vram_limit_gb or config.VRAM_LIMIT_GB
+        self.active_sessions: Dict[str, dict] = {}  # session_id -> session_info
         self._semaphore = asyncio.Semaphore(self.max_sessions)
-        self._lock = asyncio.Lock()  # Protect active_sessions dict
+        self._lock = asyncio.Lock()
+
+        # Enhanced monitoring
+        self.rejection_count = 0
+        self.last_vram_check = 0
+        self.vram_history: List[Tuple[float, float]] = []  # (timestamp, usage_percent)
+        self.gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
 
         logger.info("session_manager.init",
                    max_sessions=self.max_sessions,
-                   vram_limit_gb=config.VRAM_LIMIT_GB)
+                   vram_limit_gb=self.vram_limit_gb,
+                   gpu_count=self.gpu_count)
 
-    async def acquire_session(self, session_id: str, timeout: float = 1.0) -> bool:
+    async def acquire_session(self, session_id: str, timeout: float = 1.0,
+                            service_type: str = "general") -> bool:
         """
-        Try to acquire a session slot
+        Try to acquire a session slot with enhanced VRAM monitoring
 
         Args:
             session_id: Unique session identifier
             timeout: Timeout in seconds (fail fast)
+            service_type: Type of service (stt, llm, tts_fast, tts_hq)
 
         Returns:
             True if session acquired, False if server is full
 
         Design note:
-        Uses timeout=1.0s to fail fast. No waiting queue.
-        Linus would say: "Don't make users wait. Tell them immediately."
+        Enhanced with multi-GPU VRAM monitoring and intelligent throttling.
         """
-        # 1. Check VRAM availability (fast path)
-        if not self._check_vram_available():
-            vram_usage = self._get_vram_usage_gb()
-            logger.warning("session_manager.vram_full",
+        # 1. Multi-GPU VRAM availability check
+        vram_status = self._get_multi_gpu_vram_status()
+        can_accept = self._evaluate_session_acceptance(vram_status, service_type)
+
+        if not can_accept:
+            self.rejection_count += 1
+            logger.warning("session_manager.rejected",
                           session_id=session_id,
-                          vram_allocated_gb=vram_usage,
-                          vram_limit_gb=config.VRAM_LIMIT_GB)
+                          service_type=service_type,
+                          reason="vram_insufficient",
+                          rejection_count=self.rejection_count,
+                          vram_status=[{
+                              "gpu": i,
+                              "usage": status.usage_percent,
+                              "threshold": status.threshold.name
+                          } for i, status in enumerate(vram_status)])
             return False
 
         # 2. Try to acquire semaphore with timeout
         try:
-            acquired = await asyncio.wait_for(
+            await asyncio.wait_for(
                 self._semaphore.acquire(),
                 timeout=timeout
             )
 
-            if not acquired:
-                return False
-
-            # 3. Register session
+            # 3. Register session with metadata
             async with self._lock:
-                self.active_sessions[session_id] = True
+                self.active_sessions[session_id] = {
+                    "service_type": service_type,
+                    "started_at": time.time(),
+                    "gpu_allocation": self._suggest_gpu_allocation(service_type),
+                    "vram_snapshot": vram_status
+                }
 
             logger.info("session_manager.acquired",
                        session_id=session_id,
+                       service_type=service_type,
                        active_count=len(self.active_sessions),
-                       max_sessions=self.max_sessions)
+                       max_sessions=self.max_sessions,
+                       gpu_allocation=self.active_sessions[session_id]["gpu_allocation"])
 
             return True
 
         except asyncio.TimeoutError:
-            logger.warning("session_manager.limit_reached",
+            self.rejection_count += 1
+            logger.warning("session_manager.timeout",
                           session_id=session_id,
                           active_count=len(self.active_sessions),
-                          max_sessions=self.max_sessions)
+                          max_sessions=self.max_sessions,
+                          rejection_count=self.rejection_count)
             return False
 
     def release_session(self, session_id: str):
