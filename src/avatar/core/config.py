@@ -52,7 +52,7 @@ class Config:
         "AVATAR_VLLM_MODEL",
         "Qwen/Qwen2.5-7B-Instruct-AWQ"
     )
-    VLLM_GPU_MEMORY: float = float(os.getenv("AVATAR_VLLM_MEMORY", "0.5"))
+    VLLM_GPU_MEMORY: float = float(os.getenv("AVATAR_VLLM_MEMORY", "0.75"))  # GPU 記憶體比例
     VLLM_MAX_TOKENS: int = int(os.getenv("AVATAR_VLLM_MAX_TOKENS", "2048"))
 
     # TTS settings
