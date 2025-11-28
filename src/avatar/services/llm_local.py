@@ -332,11 +332,11 @@ class VLLMProvider:
 
 
 # Global singleton instance
-_llm_service: Optional[LLMService] = None
+_llm_service: Optional[VLLMProvider] = None
 _llm_service_lock = asyncio.Lock()
 
 
-async def get_llm_service() -> LLMService:
+async def get_llm_service() -> VLLMProvider:
     """
     Get global LLM service instance (singleton pattern)
 
@@ -344,7 +344,7 @@ async def get_llm_service() -> LLMService:
     in concurrent initialization.
 
     Returns:
-        LLMService instance
+        VLLMProvider instance
     """
     global _llm_service
 
@@ -356,7 +356,7 @@ async def get_llm_service() -> LLMService:
     async with _llm_service_lock:
         # Double-check after acquiring lock (another coroutine might have initialized)
         if _llm_service is None:
-            _llm_service = LLMService()
+            _llm_service = VLLMProvider()
             logger.info("llm.service_created")
 
     return _llm_service

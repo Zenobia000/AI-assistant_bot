@@ -160,11 +160,11 @@ class WhisperSTTProvider:
 
 
 # Global singleton instance
-_stt_service: Optional[STTService] = None
+_stt_service: Optional[WhisperSTTProvider] = None
 _stt_service_lock = asyncio.Lock()
 
 
-async def get_stt_service() -> STTService:
+async def get_stt_service() -> WhisperSTTProvider:
     """
     Get global STT service instance (singleton pattern)
 
@@ -172,7 +172,7 @@ async def get_stt_service() -> STTService:
     in concurrent initialization.
 
     Returns:
-        STTService instance
+        WhisperSTTProvider instance
     """
     global _stt_service
 
@@ -185,7 +185,7 @@ async def get_stt_service() -> STTService:
         # Double-check after acquiring lock (another coroutine might have initialized)
         if _stt_service is None:
             model_size = config.WHISPER_MODEL_SIZE
-            _stt_service = STTService(
+            _stt_service = WhisperSTTProvider(
                 model_size=model_size,
                 device="cpu",
                 compute_type="int8"

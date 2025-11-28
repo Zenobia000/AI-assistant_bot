@@ -38,7 +38,7 @@ async def get_tts_service() -> TTSProvider:
     if provider == "local":
         from avatar.services.tts_local import F5TTSProvider
         logger.info("tts.factory.init", provider="local")
-        _tts_service = await F5TTSProvider.create()
+        _tts_service = F5TTSProvider()
 
     # 未來擴展點
     # elif provider == "elevenlabs":

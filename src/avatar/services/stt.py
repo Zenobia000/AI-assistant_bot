@@ -54,7 +54,7 @@ async def get_stt_service() -> STTProvider:
                    provider="local",
                    model=config.WHISPER_MODEL_SIZE,
                    device=config.WHISPER_DEVICE)
-        _stt_service = await WhisperSTTProvider.create(
+        _stt_service = WhisperSTTProvider(
             model_size=config.WHISPER_MODEL_SIZE,
             device=config.WHISPER_DEVICE,
             compute_type=config.WHISPER_COMPUTE_TYPE

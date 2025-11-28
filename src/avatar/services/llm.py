@@ -41,7 +41,7 @@ async def get_llm_service() -> LLMProvider:
                    provider="local",
                    model=config.VLLM_MODEL,
                    gpu_memory=config.VLLM_GPU_MEMORY)
-        _llm_service = await VLLMProvider.create(
+        _llm_service = VLLMProvider(
             model_path=config.VLLM_MODEL,
             gpu_memory_utilization=config.VLLM_GPU_MEMORY,
             max_model_len=config.VLLM_MAX_TOKENS

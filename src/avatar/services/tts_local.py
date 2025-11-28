@@ -319,11 +319,11 @@ class F5TTSProvider:
 
 
 # Global singleton instance
-_tts_service: Optional[TTSService] = None
+_tts_service: Optional[F5TTSProvider] = None
 _tts_service_lock = asyncio.Lock()
 
 
-async def get_tts_service() -> TTSService:
+async def get_tts_service() -> F5TTSProvider:
     """
     Get global TTS service instance (singleton pattern)
 
@@ -331,7 +331,7 @@ async def get_tts_service() -> TTSService:
     in concurrent initialization.
 
     Returns:
-        TTSService instance
+        F5TTSProvider instance
     """
     global _tts_service
 
@@ -343,7 +343,7 @@ async def get_tts_service() -> TTSService:
     async with _tts_service_lock:
         # Double-check after acquiring lock (another coroutine might have initialized)
         if _tts_service is None:
-            _tts_service = TTSService()
+            _tts_service = F5TTSProvider()
             logger.info("tts.service_created")
 
     return _tts_service
