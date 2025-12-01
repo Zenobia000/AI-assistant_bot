@@ -237,7 +237,7 @@ class TTSHQService:
         Returns:
             Path to the synthesized audio file
         """
-        from avatar.services.tts import _load_voice_profile
+        from avatar.services.tts_local import _load_voice_profile
 
         # Load voice profile
         ref_audio_path, ref_text = _load_voice_profile(voice_profile_name)

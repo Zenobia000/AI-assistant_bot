@@ -10,7 +10,9 @@
       "Bash(done)",
       "Bash(dos2unix:*)",
       "Bash(audio/profiles/test_profile/reference.txt)",
-      "Bash(do echo \"=== $dir ===\")"
+      "Bash(do echo \"=== $dir ===\")",
+      "Bash(poetry run pip install:*)",
+      "Bash(poetry install:*)"
     ],
     "deny": [],
     "ask": []

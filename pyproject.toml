@@ -66,7 +66,6 @@ structlog = ">=23.0.0"  # 結構化日誌
 #    poetry run pip install -r /tmp/CosyVoice/requirements.txt
 #
 # ⚠️ 已知問題: Poetry show 會顯示錯誤版本，請使用 pip list 檢查
-vllm = "0.5.3"  # ⚠️ 降級：0.11.0 需要 torch 2.8.0，與 CosyVoice3 衝突
 faster-whisper = "^1.2.1"
 hyperpyyaml = "^1.2.2"
 modelscope = "^1.31.0"

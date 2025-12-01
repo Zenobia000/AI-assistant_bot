@@ -42,17 +42,53 @@ class Config:
     GPU_DEVICE: Optional[int] = None if os.getenv("AVATAR_GPU_DEVICE") is None else int(os.getenv("AVATAR_GPU_DEVICE", "1"))  # Use GPU 1 (RTX 4000)
     AUTO_SELECT_GPU: bool = os.getenv("AVATAR_AUTO_SELECT_GPU", "true").lower() == "true"
 
-    # AI Model settings
+    # ============================================================
+    # Service Provider Configuration (地端/API 切換)
+    # ============================================================
+
+    # Provider Mode Selection
+    # 支援的 STT Providers: local (Whisper), openai, azure, google
+    STT_PROVIDER: str = os.getenv("AVATAR_STT_PROVIDER", "local")
+
+    # 支援的 LLM Providers: local (vLLM), openai, anthropic, azure
+    LLM_PROVIDER: str = os.getenv("AVATAR_LLM_PROVIDER", "local")
+
+    # 支援的 TTS Providers: local (F5-TTS), elevenlabs, azure, openai
+    TTS_PROVIDER: str = os.getenv("AVATAR_TTS_PROVIDER", "local")
+
+    # -------------------- STT API Configuration --------------------
+    STT_API_KEY: Optional[str] = os.getenv("AVATAR_STT_API_KEY")
+    STT_API_ENDPOINT: Optional[str] = os.getenv("AVATAR_STT_API_ENDPOINT")
+    STT_API_MODEL: str = os.getenv("AVATAR_STT_API_MODEL", "whisper-1")
+
+    # -------------------- LLM API Configuration --------------------
+    LLM_API_KEY: Optional[str] = os.getenv("AVATAR_LLM_API_KEY")
+    LLM_API_ENDPOINT: Optional[str] = os.getenv("AVATAR_LLM_API_ENDPOINT")
+    LLM_API_MODEL: str = os.getenv("AVATAR_LLM_API_MODEL", "gpt-4")
+    LLM_API_BASE_URL: Optional[str] = os.getenv("AVATAR_LLM_API_BASE_URL")  # For custom endpoints
+
+    # -------------------- TTS API Configuration --------------------
+    TTS_API_KEY: Optional[str] = os.getenv("AVATAR_TTS_API_KEY")
+    TTS_API_ENDPOINT: Optional[str] = os.getenv("AVATAR_TTS_API_ENDPOINT")
+    TTS_API_VOICE: str = os.getenv("AVATAR_TTS_API_VOICE", "alloy")
+    TTS_API_MODEL: str = os.getenv("AVATAR_TTS_API_MODEL", "tts-1")
+
+    # ============================================================
+    # Local AI Model Settings (when using local providers)
+    # ============================================================
+
+    # Whisper STT (Local)
     # ⚠️ Whisper uses CPU to avoid VRAM contention with LLM/TTS
     WHISPER_MODEL_SIZE: str = os.getenv("AVATAR_WHISPER_MODEL", "base")  # tiny, base, small, medium, large
     WHISPER_DEVICE: str = os.getenv("AVATAR_WHISPER_DEVICE", "cpu")  # Force CPU inference
     WHISPER_COMPUTE_TYPE: str = os.getenv("AVATAR_WHISPER_COMPUTE", "int8")  # int8 for CPU efficiency
 
+    # vLLM (Local)
     VLLM_MODEL: str = os.getenv(
         "AVATAR_VLLM_MODEL",
         "Qwen/Qwen2.5-7B-Instruct-AWQ"
     )
-    VLLM_GPU_MEMORY: float = float(os.getenv("AVATAR_VLLM_MEMORY", "0.5"))
+    VLLM_GPU_MEMORY: float = float(os.getenv("AVATAR_VLLM_MEMORY", "0.75"))  # GPU 記憶體比例
     VLLM_MAX_TOKENS: int = int(os.getenv("AVATAR_VLLM_MAX_TOKENS", "2048"))
 
     # TTS settings
